@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stillpoint — a quiet place to name what you're feeling</title>
+  <meta name="description" content="Stillpoint is a private, on-device tool for naming difficult emotions. Your words stay on your device." />
+
+  <!-- Atkinson Hyperlegible Next: designed by the Braille Institute specifically
+       for readers with low vision. Used everywhere, not just as an accent —
+       legibility is the point, not a decoration. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="stillpoint-mark" aria-hidden="true"></div>
+    <h1>Stillpoint</h1>
+    <p class="tagline">A quiet place to name what you're feeling</p>
+  </header>
+
+  <main id="main">
+
+    <details class="settings-panel">
+      <summary>Settings — Gemini API key</summary>
+      <div class="settings-body">
+        <p class="settings-explainer">
+          Stillpoint uses your own Gemini API key. Your key is kept only in this
+          browser tab's memory — it is never saved to disk and clears when you
+          close the page.
+        </p>
+        <label for="apiKeyInput">Gemini API key</label>
+        <input
+          type="password"
+          id="apiKeyInput"
+          name="apiKeyInput"
+          autocomplete="off"
+          placeholder="Paste your API key"
+        />
+        <div class="settings-actions">
+          <button type="button" id="saveKeyBtn">Save key for this session</button>
+          <button type="button" id="clearKeyBtn" class="secondary">Clear key</button>
+        </div>
+        <p id="keyStatus" class="key-status" aria-live="polite"></p>
+      </div>
+    </details>
+
+    <section class="input-section" aria-labelledby="input-heading">
+      <h2 id="input-heading">How are you feeling right now?</h2>
+      <p class="input-hint">
+        Write as much or as little as you'd like. Nothing you type here leaves
+        your device — only a short summary of the emotions themselves does.
+      </p>
+      <label class="visually-hidden" for="feelingInput">Describe how you're feeling</label>
+      <textarea
+        id="feelingInput"
+        name="feelingInput"
+        rows="6"
+        placeholder="I've been feeling…"
+      ></textarea>
+      <button type="button" id="submitBtn" class="primary-action">
+        Share how I feel
+      </button>
+    </section>
+
+    <section class="response-section" aria-labelledby="response-heading">
+      <h2 id="response-heading" class="visually-hidden">Response</h2>
+      <p id="status" class="status" aria-live="polite"></p>
+      <div id="output" aria-live="polite"></div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Stillpoint keeps your words on your device. Only a short, general
+      summary of your emotions is ever sent — and never during a crisis.
+    </p>
+  </footer>
+
+  <script type="module">
+    import { handleUserSubmit, setApiKey, clearApiKey } from "./app.js";
+
+    const feelingInput = document.getElementById("feelingInput");
+    const submitBtn = document.getElementById("submitBtn");
+    const apiKeyInput = document.getElementById("apiKeyInput");
+    const saveKeyBtn = document.getElementById("saveKeyBtn");
+    const clearKeyBtn = document.getElementById("clearKeyBtn");
+    const keyStatus = document.getElementById("keyStatus");
+
+    submitBtn.addEventListener("click", () => {
+      handleUserSubmit(feelingInput.value);
+    });
+
+    // Allow Ctrl/Cmd+Enter to submit from the textarea without losing
+    // normal Enter-for-newline behavior.
+    feelingInput.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        handleUserSubmit(feelingInput.value);
+      }
+    });
+
+    saveKeyBtn.addEventListener("click", () => {
+      setApiKey(apiKeyInput.value);
+      keyStatus.textContent = apiKeyInput.value.trim()
+        ? "Key saved for this session."
+        : "Please enter a key first.";
+    });
+
+    clearKeyBtn.addEventListener("click", () => {
+      clearApiKey();
+      apiKeyInput.value = "";
+      keyStatus.textContent = "Key cleared.";
+    });
+  </script>
+
+</body>
+</html>
