@@ -8,10 +8,15 @@
  *
  * This module must never be called if parser.js returned
  * { isCrisis: true } — that path is handled entirely locally in app.js.
+ *
+ * Network transport is handled by Google's official @google/genai SDK
+ * (npm install @google/genai). This file does not construct REST URLs,
+ * headers, or request bodies by hand — the SDK owns that.
  */
 
-const GEMINI_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+import { GoogleGenAI } from "@google/genai";
+
+const MODEL_NAME = "gemini-2.0-flash";
 
 const SYSTEM_INSTRUCTION = `
 You are a supportive, grounding presence for someone who is having a
@@ -41,7 +46,7 @@ Rules you must follow:
  * @param {{emotions: string[], intensity: string, negated: string[], contextTag: string}} summary
  * @param {string} apiKey - user-supplied Gemini API key (BYOK)
  * @returns {Promise<string>} supportive response text
- * @throws {Error} on network failure, bad key, or malformed API response
+ * @throws {Error} on SDK/network failure, bad key, or malformed API response
  */
 export async function getSupportiveResponse(summary, apiKey) {
   if (!apiKey || typeof apiKey !== "string") {
@@ -49,45 +54,27 @@ export async function getSupportiveResponse(summary, apiKey) {
   }
   validateSummaryShape(summary);
 
-  const body = {
-    system_instruction: {
-      parts: [{ text: SYSTEM_INSTRUCTION }],
-    },
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: JSON.stringify(summary) }],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 200,
-    },
-  };
+  // The SDK client is constructed fresh from the in-memory, user-supplied
+  // key for each call. Nothing about the key is written to disk, storage,
+  // or logs here — see the note at the bottom of this file.
+  const ai = new GoogleGenAI({ apiKey });
 
   let response;
   try {
-    response = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: JSON.stringify(summary),
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        temperature: 0.7,
+        maxOutputTokens: 200,
+      },
     });
-  } catch (networkErr) {
-    throw new Error("Network error contacting Gemini. Check your connection and try again.");
+  } catch (err) {
+    throw new Error(mapSdkErrorMessage(err));
   }
 
-  if (!response.ok) {
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
-      throw new Error("Your API key was rejected. Double-check it in settings.");
-    }
-    if (response.status === 429) {
-      throw new Error("Rate limit reached. Please wait a moment and try again.");
-    }
-    throw new Error(`Gemini request failed (status ${response.status}).`);
-  }
-
-  const data = await response.json();
-  return extractText(data);
+  return extractText(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -109,9 +96,38 @@ function validateSummaryShape(summary) {
   }
 }
 
-function extractText(apiResponseData) {
+/**
+ * Turns an error thrown by the SDK into a safe, user-facing message.
+ * Never includes the API key or any raw request/response payload.
+ */
+function mapSdkErrorMessage(err) {
+  // The SDK's ApiError exposes an HTTP-style status code.
+  const status = err && typeof err.status === "number" ? err.status : undefined;
+
+  if (status === 400 || status === 401 || status === 403) {
+    return "Your API key was rejected. Double-check it in settings.";
+  }
+  if (status === 429) {
+    return "Rate limit reached. Please wait a moment and try again.";
+  }
+  if (typeof status === "number") {
+    return `Gemini request failed (status ${status}).`;
+  }
+
+  // Fall back to sniffing common network-failure signatures without
+  // echoing the underlying error object (which could, in principle,
+  // contain the request details).
+  const msg = err && typeof err.message === "string" ? err.message.toLowerCase() : "";
+  if (msg.includes("fetch failed") || msg.includes("network") || msg.includes("enotfound") || msg.includes("econnrefused")) {
+    return "Network error contacting Gemini. Check your connection and try again.";
+  }
+
+  return "Gemini request failed unexpectedly. Please try again.";
+}
+
+function extractText(response) {
   try {
-    const text = apiResponseData.candidates[0].content.parts[0].text;
+    const text = response.text;
     if (typeof text !== "string" || !text.trim()) {
       throw new Error("empty");
     }
@@ -126,6 +142,7 @@ function extractText(apiResponseData) {
  * Per Stillpoint's privacy model, the API key should live only in memory
  * (a JS variable / React state) for the duration of the session — never
  * localStorage/sessionStorage, and never sent anywhere but the Gemini
- * endpoint itself. If persistence across sessions is wanted later, that
- * needs its own explicit, opt-in design decision — not a default.
+ * API itself (now via the official @google/genai SDK). If persistence
+ * across sessions is wanted later, that needs its own explicit, opt-in
+ * design decision — not a default.
  */
