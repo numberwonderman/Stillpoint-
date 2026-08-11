@@ -19,7 +19,12 @@
 
 import { GoogleGenAI } from "https://esm.run/@google/genai@2.16.0";
 
-const MODEL_NAME = "gemini-2.0-flash";
+// gemini-2.0-flash was shut down by Google on June 1, 2026 — see
+// https://ai.google.dev/gemini-api/docs/deprecations. gemini-3.1-flash-lite
+// is a current, GA model with the highest free-tier requests-per-minute
+// ceiling of the supported models, which fits this task well: short,
+// simple, structured-input responses rather than heavy reasoning.
+const MODEL_NAME = "gemini-3.1-flash-lite";
 
 const SYSTEM_INSTRUCTION = `
 You are a supportive, grounding presence for someone who is having a
@@ -62,22 +67,40 @@ export async function getSupportiveResponse(summary, apiKey) {
   // or logs here — see the note at the bottom of this file.
   const ai = new GoogleGenAI({ apiKey });
 
+  const request = {
+    model: MODEL_NAME,
+    contents: JSON.stringify(summary),
+    config: {
+      systemInstruction: SYSTEM_INSTRUCTION,
+      temperature: 0.7,
+      maxOutputTokens: 200,
+    },
+  };
+
   let response;
   try {
-    response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: JSON.stringify(summary),
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: 0.7,
-        maxOutputTokens: 200,
-      },
-    });
+    response = await ai.models.generateContent(request);
   } catch (err) {
-    throw new Error(mapSdkErrorMessage(err));
+    if (err && err.status === 429) {
+      // Free-tier rate limits are tight; a single short backoff-and-retry
+      // resolves most momentary throttling without the person having to
+      // manually retry. If it fails a second time, surface the error.
+      await sleep(1500);
+      try {
+        response = await ai.models.generateContent(request);
+      } catch (retryErr) {
+        throw new Error(mapSdkErrorMessage(retryErr));
+      }
+    } else {
+      throw new Error(mapSdkErrorMessage(err));
+    }
   }
 
   return extractText(response);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ---------------------------------------------------------------------------
