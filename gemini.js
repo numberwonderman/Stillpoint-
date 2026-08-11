@@ -9,12 +9,15 @@
  * This module must never be called if parser.js returned
  * { isCrisis: true } — that path is handled entirely locally in app.js.
  *
- * Network transport is handled by Google's official @google/genai SDK
- * (npm install @google/genai). This file does not construct REST URLs,
- * headers, or request bodies by hand — the SDK owns that.
+ * Network transport is handled by Google's official @google/genai SDK,
+ * loaded here as a browser-native ES module from a CDN (no npm install,
+ * no bundler, no build step — this stays a raw static file like the
+ * rest of Stillpoint, servable as-is from GitHub Pages). This file does
+ * not construct REST URLs, headers, or request bodies by hand — the SDK
+ * owns that.
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "https://esm.run/@google/genai@2.16.0";
 
 const MODEL_NAME = "gemini-2.0-flash";
 
