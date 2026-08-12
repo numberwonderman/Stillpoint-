@@ -7,7 +7,7 @@ import * as webllm from "https://esm.run/@mlc-ai/web-llm";
 
 // Pin a small, quantized model suitable for emotion-matched filler responses.
 // Swap this string if you land on a different model after testing browser memory limits.
-const MODEL_ID = "Llama-3.2-1B-Instruct-q4f16_1-MLK";
+const MODEL_ID = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
 
 let engine = null;
 let isLoading = false;
