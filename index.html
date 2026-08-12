@@ -56,6 +56,23 @@
       </div>
     </details>
 
+    <details class="settings-panel">
+      <summary>Settings — Local AI mode</summary>
+      <div class="settings-body">
+        <p class="settings-explainer">
+          Local AI mode runs a small model entirely in this browser tab
+          — nothing is sent anywhere, even the short summary. It requires
+          a browser with WebGPU support and downloads a one-time model file
+          the first time you use it each session.
+        </p>
+        <label class="toggle-row" for="localAIToggle">
+          <input type="checkbox" id="localAIToggle" name="localAIToggle" />
+          Use Local AI mode instead of Gemini
+        </label>
+        <p id="localAIStatus" class="key-status" aria-live="polite"></p>
+      </div>
+    </details>
+
     <section class="input-section" aria-labelledby="input-heading">
       <h2 id="input-heading">How are you feeling right now?</h2>
       <p class="input-hint">
@@ -90,7 +107,13 @@
   </footer>
 
   <script type="module">
-    import { handleUserSubmit, setApiKey, clearApiKey } from "./app.js";
+    import {
+      handleUserSubmit,
+      setApiKey,
+      clearApiKey,
+      setLocalAIMode,
+    } from "./app.js";
+    import { isLocalAISupported } from "./localai.js";
 
     const feelingInput = document.getElementById("feelingInput");
     const submitBtn = document.getElementById("submitBtn");
@@ -98,6 +121,8 @@
     const saveKeyBtn = document.getElementById("saveKeyBtn");
     const clearKeyBtn = document.getElementById("clearKeyBtn");
     const keyStatus = document.getElementById("keyStatus");
+    const localAIToggle = document.getElementById("localAIToggle");
+    const localAIStatus = document.getElementById("localAIStatus");
 
     submitBtn.addEventListener("click", () => {
       handleUserSubmit(feelingInput.value);
@@ -122,6 +147,21 @@
       clearApiKey();
       apiKeyInput.value = "";
       keyStatus.textContent = "Key cleared.";
+    });
+
+    // Local AI mode: disable the toggle up front if this browser can't
+    // support it at all, rather than letting the user flip it and hit
+    // an error on submit.
+    if (!isLocalAISupported()) {
+      localAIToggle.disabled = true;
+      localAIStatus.textContent = "Not supported in this browser (requires WebGPU).";
+    }
+
+    localAIToggle.addEventListener("change", () => {
+      setLocalAIMode(localAIToggle.checked);
+      localAIStatus.textContent = localAIToggle.checked
+        ? "Local AI mode on. The model loads once you submit."
+        : "Using Gemini (cloud).";
     });
   </script>
 
