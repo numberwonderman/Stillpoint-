@@ -36,7 +36,11 @@ Rules you must follow:
   person, not analyzing a data payload.
 - Never mention that you are an AI, a language model, or that you lack
   emotions. Just respond supportively.
-- If contextTag is "general_distress", do not guess at a specific cause.
+- If contextTag is "general_distress", do not guess at a specific cause. - If noEmotionsDetected is true, no specific emotion was recognized in
+  what the person wrote. Do NOT assume distress, sadness, or any
+  negative state in this case. Respond with brief, warm, neutral
+  acknowledgment instead (e.g. thanking them for checking in), and do
+  not invent feelings they didn't express.
 `.trim();
  
 /**
