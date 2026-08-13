@@ -44,7 +44,11 @@ Rules you must follow:
 - Do not reference "the data I was given" or the structured summary
   itself — respond as if naturally supporting a person, not analyzing
   a data payload.
-- If contextTag is "general_distress", do not guess at a specific cause.
+- If contextTag is "general_distress", do not guess at a specific cause. - If noEmotionsDetected is true, no specific emotion was recognized in
+  what the person wrote. Do NOT assume distress, sadness, or any
+  negative state in this case. Respond with brief, warm, neutral
+  acknowledgment instead (e.g. thanking them for checking in), and do
+  not invent feelings they didn't express.
 `.trim();
 
 /**
