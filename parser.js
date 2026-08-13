@@ -78,11 +78,6 @@ function normalize(text) {
   return text.toLowerCase().trim();
 }
 
-// Crisis matching strips apostrophes from BOTH the input and the lexicon
-// terms before comparing, so "dont want to be here" still matches
-// "don't want to be here". This is deliberately blunt: apostrophe
-// variants, missing apostrophes, and typed-fast contractions must never
-// let a crisis phrase slip past the gate.
 function stripApostrophes(text) {
   return text.replace(/['\u2019]/g, "");
 }
@@ -99,8 +94,6 @@ function splitSentences(normalizedText) {
     .filter(Boolean);
 }
 
-// Strips punctuation except apostrophes (so "don't" stays one token),
-// splits on whitespace.
 function tokenize(sentence) {
   return sentence
     .replace(/[^\w\s']/g, "")
@@ -108,9 +101,6 @@ function tokenize(sentence) {
     .filter(Boolean);
 }
 
-// Builds n-gram phrases (length 3 down to 1) with their starting token index,
-// so multi-word lexicon entries (e.g. "checked out", "a bit") can be matched
-// alongside single-word ones.
 function ngramsWithIndex(tokens, maxLen = 3) {
   const results = [];
   for (let len = maxLen; len >= 1; len--) {
@@ -129,7 +119,7 @@ function isNegatedAt(tokens, startIndex) {
 
 function matchEmotions(tokens, emotions, negated) {
   const candidates = ngramsWithIndex(tokens);
-  const matchedIndices = new Set(); // avoid double-matching overlapping n-grams
+  const matchedIndices = new Set();
 
   for (const { phrase, startIndex } of candidates) {
     if (matchedIndices.has(startIndex)) continue;
@@ -160,13 +150,4 @@ function highestIntensityIn(tokens) {
     }
   }
   return best;
-}
-
-  return {
-    emotions: [...emotions],
-    intensity,
-    negated: [...negated],
-    contextTag,
-    noEmotionsDetected: emotions.size === 0,
-  };
 }
