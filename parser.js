@@ -26,7 +26,7 @@ const NEGATION_WINDOW = 3; // max tokens a negation can precede an emotion word 
 /**
  * Public entry point.
  * @param {string} rawText - unmodified user input
- * @returns {{isCrisis: true} | {emotions: string[], intensity: string, negated: string[], contextTag: string}}
+ * @returns {{isCrisis: true} | {emotions: string[], intensity: string, negated: string[], contextTag: string, noEmotionsDetected: boolean}}
  */
 export function parseInput(rawText) {
   const normalized = normalize(rawText);
@@ -62,11 +62,18 @@ export function parseInput(rawText) {
   const contextTag = matchContextTag(normalized);
 
   // --- Step 4: Output assembly — minimal schema, no raw text.
+  // noEmotionsDetected distinguishes "we recognized nothing in the lexicon"
+  // from genuine unspecified distress. Without this flag, both cases
+  // collapse into contextTag: "general_distress" with an empty emotions
+  // array, and a downstream model (especially a small local one) may
+  // interpret the ambiguity as license to invent negative emotions rather
+  // than staying neutral. See: local-mode mismatch, Aug 2026.
   return {
     emotions: [...emotions],
     intensity,
     negated: [...negated],
     contextTag,
+    noEmotionsDetected: emotions.size === 0,
   };
 }
 
@@ -150,4 +157,13 @@ function highestIntensityIn(tokens) {
     }
   }
   return best;
+}
+
+function matchContextTag(normalizedText) {
+  for (const [tag, triggers] of Object.entries(CONTEXT_TAGS)) {
+    if (triggers.some((word) => normalizedText.includes(word))) {
+      return tag;
+    }
+  }
+  return "general_distress";
 }
