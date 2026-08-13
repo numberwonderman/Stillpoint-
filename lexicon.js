@@ -73,8 +73,13 @@ export const EMOTION_BUCKETS = {
   "Numb / Flat": [
     "numb", "flat", "nothing", "disconnected", "checked out", "blank",
   ],
-  "Okay / Good": [
-    "okay", "fine", "good", "calm", "steady", "content",
+    "Okay / Good": [
+    "okay", "alright", "all right", "fine", "good", "calm", "steady",
+    "content", "at ease", "relaxed",
+  ],
+  "Excited / Happy": [
+    "excited", "happy", "great", "glad", "thrilled", "joyful", "hopeful",
+    "pumped", "psyched", "stoked", "looking forward",
   ],
 };
 
