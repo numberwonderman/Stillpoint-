@@ -30,6 +30,7 @@ export const CRISIS_TERMS = [
   "not want to be here",
   "don't want to be here",
   "no reason to live",
+  "no point in living",
   "better off dead",
   "better off without me",
   "hurt myself",
@@ -38,6 +39,14 @@ export const CRISIS_TERMS = [
   "self harm",
   "cutting myself",
   "overdose",
+  "can't go on",
+  "cant go on",
+  "want to disappear",
+  "tired of living",
+  "don't want to wake up",
+  "dont want to wake up",
+  "don't want to be alive",
+  "dont want to be alive",
 ];
 
 // ---------------------------------------------------------------------------
@@ -53,6 +62,10 @@ export const EMOTION_BUCKETS = {
   ],
   "Anxious / Worried": [
     "anxious", "worried", "nervous", "on edge", "panicked", "uneasy",
+    "overwhelmed", "stressed",
+  ],
+  "Scared / Afraid": [
+    "scared", "afraid", "fearful", "terrified", "frightened", "spooked",
   ],
   "Angry / Frustrated": [
     "angry", "frustrated", "irritated", "furious", "annoyed", "resentful",
@@ -97,8 +110,10 @@ export const NEGATION_TERMS = [
 // ---------------------------------------------------------------------------
 export const CONTEXT_TAGS = {
   work_stress: ["work", "job", "boss", "deadline", "coworker", "meeting", "fired", "shift"],
+  academic_stress: ["school", "exam", "class", "professor", "homework", "grades", "studying", "finals"],
   fatigue: ["tired", "exhausted", "can't sleep", "insomnia", "drained", "burnt out", "burned out"],
-  relationship: ["partner", "friend", "family", "relationship", "breakup", "argument", "lonely", "alone"],
+  relationship: ["partner", "friend", "family", "relationship", "breakup", "argument"],
+  isolation: ["lonely", "alone", "isolated", "no one to talk to"],
   health: ["sick", "pain", "doctor", "diagnosis", "illness", "hospital"],
   financial_stress: ["money", "bills", "rent", "debt", "broke", "paycheck"],
   general_distress: [], // fallback tag when no other context matches
