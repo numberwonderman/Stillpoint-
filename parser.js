@@ -162,11 +162,11 @@ function highestIntensityIn(tokens) {
   return best;
 }
 
-function matchContextTag(normalizedText) {
-  for (const [tag, triggers] of Object.entries(CONTEXT_TAGS)) {
-    if (triggers.some((word) => normalizedText.includes(word))) {
-      return tag;
-    }
-  }
-  return "general_distress";
+  return {
+    emotions: [...emotions],
+    intensity,
+    negated: [...negated],
+    contextTag,
+    noEmotionsDetected: emotions.size === 0,
+  };
 }
