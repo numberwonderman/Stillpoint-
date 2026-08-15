@@ -10,7 +10,11 @@
   },
   "dependencies": {
     "@google/genai": "^2.17.1",
+    "@huggingface/transformers": "^4.2.0",
     "@mlc-ai/web-llm": "^0.2.84",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^9.9.2",
     "next": "^16.3.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
