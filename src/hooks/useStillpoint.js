@@ -24,7 +24,10 @@ import {
   isLocalAISupported,
   initLocalAI,
   isLocalAIReady,
+  getReadyModelKey,
   generateLocal,
+  cancelLocalAIDownload,
+  unloadLocalAI,
 } from "@/lib/localai";
 
 export function useStillpoint() {
@@ -38,7 +41,14 @@ export function useStillpoint() {
   const [crisis, setCrisis] = useState(false);
   const [response, setResponse] = useState("");
   const [localAISupported, setLocalAISupported] = useState(false);
-  const [localAIReady, setLocalAIReady] = useState(false);
+
+  // Local AI mode state (separate from the "ready" flag on the module —
+  // this drives the settings-panel UI).
+  const [localAIEnabled, setLocalAIEnabled] = useState(false);
+  const [selectedTier, setSelectedTier] = useState(null);
+  const [downloadState, setDownloadState] = useState("idle"); // idle | downloading | ready | error | cancelled
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadText, setDownloadText] = useState("");
 
   // WebGPU availability check is browser-only and never changes for the
   // lifetime of the page, so it's safe to compute once on mount.
@@ -56,8 +66,50 @@ export function useStillpoint() {
     apiKeyRef.current = null;
   }, []);
 
-  const setLocalAIMode = useCallback((enabled) => {
-    useLocalAIRef.current = !!enabled;
+  const startDownload = useCallback(async (tier) => {
+    useLocalAIRef.current = true;
+    setDownloadState("downloading");
+    setDownloadProgress(0);
+    setDownloadText("Starting download…");
+    try {
+      await initLocalAI(
+        (report) => {
+          setDownloadProgress(report.progress || 0);
+          setDownloadText(report.text || "");
+        },
+        { tier }
+      );
+      setDownloadState("ready");
+      setDownloadProgress(1);
+    } catch (err) {
+      if (err && err.message === "cancelled") {
+        setDownloadState("cancelled");
+      } else {
+        setDownloadState("error");
+        setDownloadText(err?.message || "Download failed. You can try resuming.");
+      }
+    }
+  }, []);
+
+  const cancelDownload = useCallback(() => {
+    cancelLocalAIDownload();
+    setDownloadState("cancelled");
+  }, []);
+
+  const enableLocalAI = useCallback(() => {
+    useLocalAIRef.current = true;
+    setLocalAIEnabled(true);
+  }, []);
+
+  const disableLocalAI = useCallback(() => {
+    useLocalAIRef.current = false;
+    setLocalAIEnabled(false);
+    // Free the in-memory model weights once the person opts back into
+    // cloud mode — no reason to keep them resident.
+    unloadLocalAI();
+    setDownloadState("idle");
+    setDownloadProgress(0);
+    setDownloadText("");
   }, []);
 
   const submit = useCallback(async (rawText) => {
@@ -86,12 +138,22 @@ export function useStillpoint() {
     setError("");
 
     if (useLocalAIRef.current) {
-      await runLocalAI(result, setStatus, setError, setResponse, setLocalAIReady);
+      await runLocalAI(
+        result,
+        selectedTier,
+        setStatus,
+        setError,
+        setResponse,
+        setDownloadState,
+        setDownloadProgress,
+        setDownloadText
+      );
       return;
     }
 
     await runGemini(result, apiKeyRef.current, setStatus, setError, setResponse);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTier]);
 
   return {
     state: {
@@ -100,13 +162,23 @@ export function useStillpoint() {
       crisis,
       response,
       localAISupported,
-      localAIReady,
+      localAIEnabled,
+      localAIReady: isLocalAIReady(),
+      readyModelKey: getReadyModelKey(),
+      selectedTier,
+      downloadState,
+      downloadProgress,
+      downloadText,
     },
     actions: {
       submit,
       setApiKey,
       clearApiKey,
-      setLocalAIMode,
+      enableLocalAI,
+      disableLocalAI,
+      setSelectedTier,
+      startDownload,
+      cancelDownload,
     },
   };
 }
@@ -138,10 +210,13 @@ async function runGemini(result, apiKey, setStatus, setError, setResponse) {
 
 async function runLocalAI(
   result,
+  tier,
   setStatus,
   setError,
   setResponse,
-  setLocalAIReady
+  setDownloadState,
+  setDownloadProgress,
+  setDownloadText
 ) {
   if (!isLocalAISupported()) {
     setError("Local AI mode isn't supported in this browser. Switch to Gemini in Settings.");
@@ -149,13 +224,20 @@ async function runLocalAI(
   }
 
   try {
-    if (!isLocalAIReady()) {
+    if (!isLocalAIReady() || getReadyModelKey() !== tier) {
       setStatus("Loading on-device model… this only happens once per session.");
-      await initLocalAI((progress) => {
-        const pct = Math.round((progress.progress || 0) * 100);
-        setStatus(`Loading on-device model… ${pct}%`);
-      });
-      setLocalAIReady(true);
+      setDownloadState("downloading");
+      await initLocalAI(
+        (report) => {
+          const pct = Math.round((report.progress || 0) * 100);
+          setDownloadProgress(report.progress || 0);
+          setDownloadText(report.text || "");
+          setStatus(`Loading on-device model… ${pct}%`);
+        },
+        { tier }
+      );
+      setDownloadState("ready");
+      setDownloadProgress(1);
     }
 
     setStatus("Getting a response…");
@@ -164,6 +246,7 @@ async function runLocalAI(
     setResponse(text);
     setStatus("");
   } catch (err) {
+    setDownloadState(err?.message === "cancelled" ? "cancelled" : "error");
     setError(err.message || "Local AI mode failed. Switch to Gemini in Settings and try again.");
     setStatus("");
   }
