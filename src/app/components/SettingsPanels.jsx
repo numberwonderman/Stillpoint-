@@ -1,25 +1,31 @@
 "use client";
 
 import { useState } from "react";
+import LocalAIPanel from "./LocalAIPanel";
 
 /**
- * SettingsPanels — the two <details> panels: Gemini API key + Local AI toggle.
- * Replaces the inline <script> that wired the original index.html buttons.
- * Props mirror the public surface of the old app.js: setApiKey, clearApiKey,
- * setLocalAIMode, plus a `localAISupported` flag to disable the toggle
- * on browsers without WebGPU.
+ * SettingsPanels — the two <details> panels: Gemini API key + Local AI mode.
+ * Local AI mode's internals (device detection, tier picker, download
+ * progress, privacy modal) live in LocalAIPanel; this component just wires
+ * its props through to the orchestration hook.
  */
 export default function SettingsPanels({
   localAISupported,
+  localAIEnabled,
+  selectedTier,
+  downloadState,
+  downloadProgress,
+  downloadText,
   onSaveKey,
   onClearKey,
-  onToggleLocalAI,
+  onEnableLocalAI,
+  onDisableLocalAI,
+  onSelectTier,
+  onStartDownload,
+  onCancelDownload,
 }) {
   const [keyInput, setKeyInput] = useState("");
   const [keyStatus, setKeyStatus] = useState("");
-  const [localAIStatus, setLocalAIStatus] = useState(
-    localAISupported ? "" : "Not supported in this browser (requires WebGPU)."
-  );
 
   function handleSaveKey() {
     onSaveKey(keyInput);
@@ -34,22 +40,17 @@ export default function SettingsPanels({
     setKeyStatus("Key cleared.");
   }
 
-  function handleToggleLocalAI(e) {
-    const enabled = e.target.checked;
-    onToggleLocalAI(enabled);
-    setLocalAIStatus(
-      enabled
-        ? "Local AI mode on. The model loads once you submit."
-        : "Using Gemini (cloud)."
-    );
-  }
-
   return (
-    <>
+    <div className="mb-7 grid gap-4">
       {/* -------- Gemini API key panel -------- */}
-      <details className="mb-7 rounded-[10px] border border-border bg-surface px-5 py-4">
-        <summary className="cursor-pointer py-1 text-[1.0625rem] font-bold">
-          Settings — Gemini API key
+      <details className="group rounded-card border border-border bg-surface px-5 py-4 open:shadow-lg">
+        <summary className="flex cursor-pointer items-center justify-between py-1 text-[1.0625rem] font-bold marker:content-none">
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true">☁️</span> Settings — Gemini API key
+          </span>
+          <span className="text-text-muted transition-transform group-open:rotate-180" aria-hidden="true">
+            ⌄
+          </span>
         </summary>
         <div className="pt-4">
           <p className="mb-4 text-base text-text-muted">
@@ -63,6 +64,7 @@ export default function SettingsPanels({
               href="https://aistudio.google.com/apikey"
               target="_blank"
               rel="noopener noreferrer"
+              className="text-accent underline underline-offset-2 hover:text-accent-strong"
             >
               Google AI Studio
             </a>
@@ -97,40 +99,36 @@ export default function SettingsPanels({
               Clear key
             </button>
           </div>
-          <p className="key-status mt-3 min-h-[1.4em] text-[0.95rem] text-accent" aria-live="polite">
+          <p className="mt-3 min-h-[1.4em] text-[0.95rem] text-accent" aria-live="polite">
             {keyStatus}
           </p>
         </div>
       </details>
 
       {/* -------- Local AI mode panel -------- */}
-      <details className="mb-7 rounded-[10px] border border-border bg-surface px-5 py-4">
-        <summary className="cursor-pointer py-1 text-[1.0625rem] font-bold">
-          Settings — Local AI mode
+      <details className="group rounded-card border border-border bg-surface px-5 py-4 open:shadow-lg">
+        <summary className="flex cursor-pointer items-center justify-between py-1 text-[1.0625rem] font-bold marker:content-none">
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true">💻</span> Settings — Local AI mode
+          </span>
+          <span className="text-text-muted transition-transform group-open:rotate-180" aria-hidden="true">
+            ⌄
+          </span>
         </summary>
-        <div className="pt-4">
-          <p className="mb-4 text-base text-text-muted">
-            Local AI mode runs a small model entirely in this browser tab
-            — nothing is sent anywhere, even the short summary. It requires
-            a browser with WebGPU support and downloads a one-time model file
-            the first time you use it each session.
-          </p>
-          <label htmlFor="localAIToggle" className="mb-2 block font-bold">
-            <input
-              type="checkbox"
-              id="localAIToggle"
-              name="localAIToggle"
-              disabled={!localAISupported}
-              onChange={handleToggleLocalAI}
-              className="mr-2"
-            />
-            Use Local AI mode instead of Gemini
-          </label>
-          <p className="key-status mt-3 min-h-[1.4em] text-[0.95rem] text-accent" aria-live="polite">
-            {localAIStatus}
-          </p>
-        </div>
+        <LocalAIPanel
+          localAISupported={localAISupported}
+          enabled={localAIEnabled}
+          selectedTier={selectedTier}
+          onSelectTier={onSelectTier}
+          downloadState={downloadState}
+          downloadProgress={downloadProgress}
+          downloadText={downloadText}
+          onEnable={onEnableLocalAI}
+          onDisable={onDisableLocalAI}
+          onStartDownload={onStartDownload}
+          onCancelDownload={onCancelDownload}
+        />
       </details>
-    </>
+    </div>
   );
 }
