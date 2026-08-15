@@ -103,14 +103,6 @@ health care. If you or someone you know is in crisis in the US:
 - **Text "HELLO" to 741741** — Crisis Text Line
 - **911** — if there is immediate danger
 
-## Tech
-
-Next.js 15 (App Router) + React 19, JavaScript, Tailwind CSS v4. Package
-manager: pnpm. The Gemini API is still accessed directly from the
-browser via a user-supplied BYOK key — there is no server-side proxy,
-no env-stored key, and no backend. The optional Local AI mode runs a
-small WebLLM model entirely on-device via WebGPU.
-
 ## License
 
 MIT
