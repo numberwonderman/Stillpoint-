@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/* =============================================================
+   Stillpoint — globals.css
+   Tailwind v4 with @theme design tokens. The rules below
+   preserve the original styles.css (Atkinson Hyperlegible Next
+   everywhere, high-contrast dark palette, breathing ring).
+   Component-level styling lives in the JSX as Tailwind utility
+   classes (bg-bg, text-text, border-accent, etc.).
+   ============================================================= */
+
+@theme {
+  --color-bg: #10161a;
+  --color-surface: #1b242a;
+  --color-surface-raised: #212c33;
+  --color-text: #f4f7f6;
+  --color-text-muted: #b7c4c2;
+  --color-accent: #6fbfae;
+  --color-accent-strong: #4a9484;
+  --color-crisis: #e2574a;
+  --color-crisis-bg: #2a1614;
+  --color-border: #33403f;
+  --color-focus: #ffd166;
+
+  --font-body: "Atkinson Hyperlegible Next", -apple-system, sans-serif;
+  --font-sans: var(--font-body);
+
+  --radius-card: 10px;
+}
+
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(111, 191, 174, 0.35);
+  }
+  50% {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 10px rgba(111, 191, 174, 0);
+  }
+}
+
+.animate-breathe {
+  animation: breathe 6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-breathe {
+    animation: none;
+  }
+}
+
+html {
+  /* Respect the user's own browser text-size settings; do not lock
+     it down with px anywhere below — everything scales from this. */
+  font-size: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 1.125rem; /* 18px base — larger than typical default */
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* Visible, high-contrast focus state for every interactive element.
+   Never rely on the browser default alone, and never remove outline
+   without replacing it. */
+*:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}

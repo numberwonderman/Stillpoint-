@@ -10,14 +10,12 @@
  * { isCrisis: true } — that path is handled entirely locally in app.js.
  *
  * Network transport is handled by Google's official @google/genai SDK,
- * loaded here as a browser-native ES module from a CDN (no npm install,
- * no bundler, no build step — this stays a raw static file like the
- * rest of Stillpoint, servable as-is from GitHub Pages). This file does
- * not construct REST URLs, headers, or request bodies by hand — the SDK
+ * installed via pnpm (no CDN, no bundler shim). This file does not
+ * construct REST URLs, headers, or request bodies by hand — the SDK
  * owns that.
  */
 
-import { GoogleGenAI } from "https://esm.run/@google/genai@2.16.0";
+import { GoogleGenAI } from "@google/genai";
 
 // gemini-2.0-flash was shut down by Google on June 1, 2026 — see
 // https://ai.google.dev/gemini-api/docs/deprecations. gemini-3.1-flash-lite

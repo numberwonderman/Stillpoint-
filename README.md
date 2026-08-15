@@ -58,26 +58,41 @@ safety net entirely local and independent of any API call succeeding.
 ## Project structure
 
 ```
-index.html    Accessible UI shell
-styles.css    Visual design (high-contrast, accessible)
-app.js        Orchestration — routes between crisis / Gemini / error states
-lexicon.js    Pure data: emotion words, crisis terms, modifiers, context tags
-parser.js     Local text parsing — crisis gate, negation, intensity, tagging
-gemini.js     The only file that talks to the network (BYOK Gemini call)
+src/
+  app/
+    layout.jsx                 HTML shell, font, global CSS
+    page.jsx                   Top-level page (client component)
+    globals.css                Tailwind v4 + @theme design tokens
+    _components/
+      SiteFrame.jsx            Header / skip link / footer
+      SettingsPanels.jsx       Gemini key + Local AI toggle
+      InputSection.jsx         Textarea + submit
+      ResponseSection.jsx      Live region (status / response / crisis)
+  hooks/
+    useStillpoint.js           Orchestration: routes crisis / Gemini / Local AI
+  lib/
+    lexicon.js                 Pure data: emotion words, crisis terms, etc.
+    parser.js                  Local text parsing — crisis gate, negation, ...
+    gemini.js                  The only file that talks to the network
+    localai.js                 Optional WebLLM (on-device) backend
+package.json                   pnpm-managed
+next.config.mjs
+postcss.config.mjs
+jsconfig.json
 ```
 
-Raw user text is handled only by `app.js` and `parser.js`. It is never
-passed to `gemini.js`, logged, or persisted anywhere.
+Raw user text is handled only by `useStillpoint.js` and `parser.js`. It is
+never passed to `gemini.js`, logged, or persisted anywhere.
 
 ## Getting started
 
-1. Clone this repo and open `index.html` in a browser (or serve it with any
-   static file server — no build step required).
+1. Install dependencies: `pnpm install`.
 2. Get a free Gemini API key from [Google AI
    Studio](https://aistudio.google.com/app/apikey).
-3. Open the **Settings** panel in the app and paste your key in. It's kept
+3. Start the dev server: `pnpm dev`, then open `http://localhost:3000`.
+4. Open the **Settings** panel in the app and paste your key in. It's kept
    in memory for that browser tab only.
-4. Write how you're feeling and share it.
+5. Write how you're feeling and share it.
 
 ## A note on scope
 
@@ -90,9 +105,11 @@ health care. If you or someone you know is in crisis in the US:
 
 ## Tech
 
-Vanilla JavaScript (ES modules), no framework, no build tooling, no
-backend. Gemini API accessed directly from the browser via a user-supplied
-key.
+Next.js 15 (App Router) + React 19, JavaScript, Tailwind CSS v4. Package
+manager: pnpm. The Gemini API is still accessed directly from the
+browser via a user-supplied BYOK key — there is no server-side proxy,
+no env-stored key, and no backend. The optional Local AI mode runs a
+small WebLLM model entirely on-device via WebGPU.
 
 ## License
 

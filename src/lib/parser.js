@@ -86,7 +86,7 @@ function normalize(text) {
 }
 
 function stripApostrophes(text) {
-  return text.replace(/['\u2019]/g, "");
+  return text.replace(/['’]/g, "");
 }
 
 function containsCrisisTerm(normalizedText) {
