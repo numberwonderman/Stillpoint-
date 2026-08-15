@@ -1,4 +1,5 @@
 import "./globals.css";
+import NavBar from "./components/NavBar";
 
 export const metadata = {
   title: "Stillpoint — a quiet place to name what you're feeling",
@@ -24,7 +25,10 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <NavBar />
+        {children}
+      </body>
     </html>
   );
 }
