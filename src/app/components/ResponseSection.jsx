@@ -1,12 +1,14 @@
 "use client";
 
+import ThinkingIndicator from "./ThinkingIndicator";
+
 /**
  * ResponseSection — the live region.
  * Renders exactly one of: crisis panel, supportive response, or status/error.
  * Crisis panel content is byte-for-byte the same as the old
  * `CRISIS_RESOURCES_HTML` in app.js.
  */
-export default function ResponseSection({ status, error, crisis, response }) {
+export default function ResponseSection({ status, error, crisis, response, localAIInferring }) {
   return (
     <section aria-labelledby="response-heading" className="mb-7">
       <h2 id="response-heading" className="sr-only">
@@ -19,10 +21,14 @@ export default function ResponseSection({ status, error, crisis, response }) {
         }`}
         aria-live="polite"
       >
-        {status || (error ? error : "")}
+        {localAIInferring ? (
+          <ThinkingIndicator label="Thinking on-device" />
+        ) : (
+          status || (error ? error : "")
+        )}
       </p>
       <div id="output" aria-live="polite">
-        {crisis ? <CrisisPanel /> : response ? <SupportiveResponse text={response} /> : null}
+        {crisis ? <CrisisPanel /> : response ? <SupportiveResponse text={response} streaming={localAIInferring} /> : null}
       </div>
     </section>
   );
@@ -51,10 +57,16 @@ function CrisisPanel() {
   );
 }
 
-function SupportiveResponse({ text }) {
+function SupportiveResponse({ text, streaming }) {
   return (
     <p className="supportive-response m-0 rounded-[10px] border border-border border-l-4 border-l-accent bg-surface px-6 py-5">
       {text}
+      {streaming && (
+        <span
+          aria-hidden="true"
+          className="ml-0.5 inline-block h-[1em] w-[0.5ch] translate-y-[0.15em] animate-pulse bg-accent"
+        />
+      )}
     </p>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { MODEL_CATALOG, recommendModel } from "@/lib/localai";
 import PrivacyModal from "./PrivacyModal";
+import ThinkingIndicator from "./ThinkingIndicator";
 
 const TIER_ORDER = ["tiny", "small", "medium", "large"];
 
@@ -29,6 +30,8 @@ export default function LocalAIPanel({
   downloadState, // "idle" | "downloading" | "ready" | "error" | "cancelled"
   downloadProgress, // 0..1
   downloadText,
+  localAIStatus, // "idle" | "preparing" | "downloading" | "thinking" | "disposing"
+  localAIInferring, // boolean — true while the worker is generating
   onEnable,
   onDisable,
   onStartDownload,
@@ -157,6 +160,8 @@ export default function LocalAIPanel({
             progressPct={pct}
             text={downloadText}
             modelLabel={MODEL_CATALOG[activeTier].label}
+            localAIStatus={localAIStatus}
+            localAIInferring={localAIInferring}
             onStart={() => onStartDownload(activeTier)}
             onResume={() => onStartDownload(activeTier)}
             onCancel={onCancelDownload}
@@ -173,12 +178,37 @@ export default function LocalAIPanel({
   );
 }
 
-function DownloadStatus({ state, progressPct, text, modelLabel, onStart, onResume, onCancel }) {
+function DownloadStatus({ state, progressPct, text, modelLabel, localAIStatus, localAIInferring, onStart, onResume, onCancel }) {
   if (state === "ready") {
     return (
       <p className="flex items-center gap-2 text-[0.95rem] font-bold text-accent" aria-live="polite">
         <span aria-hidden="true">✓</span> {modelLabel} model ready on-device.
+        {localAIInferring && (
+          <span className="ml-1 font-normal text-text-muted">
+            <ThinkingIndicator label="Thinking on-device" />
+          </span>
+        )}
       </p>
+    );
+  }
+
+  // While the worker is compiling WASM or otherwise preparing before any
+  // progress events arrive, surface that so the user doesn't think the
+  // page is stuck.
+  if (state === "downloading" && localAIStatus === "preparing" && progressPct === 0) {
+    return (
+      <div aria-live="polite" className="flex items-center justify-between gap-3">
+        <p className="m-0 flex items-center gap-2 text-[0.9rem] text-text-muted">
+          <ThinkingIndicator label={text || "Preparing on-device model"} />
+        </p>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 rounded-[8px] border border-border px-3 py-1.5 text-[0.85rem] font-bold hover:border-crisis hover:text-crisis"
+        >
+          Cancel
+        </button>
+      </div>
     );
   }
 

@@ -98,3 +98,32 @@ a {
 a:hover {
   color: var(--color-accent-strong);
 }
+
+/* Thinking-indicator dot animation. The three .thinking-dot spans
+   share the same keyframe but are staggered via inline animation-delay
+   so the dots pulse in sequence. Wrapped in the reduced-motion media
+   query so the indicator stays static for users who prefer it. */
+@keyframes thinking-dot-pulse {
+  0%, 60%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .thinking-dot {
+    animation: thinking-dot-pulse 1.05s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-dot {
+    /* Steady, full-opacity dots when motion is reduced. */
+    transform: scale(1);
+    opacity: 1;
+  }
+}

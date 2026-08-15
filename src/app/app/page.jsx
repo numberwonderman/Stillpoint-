@@ -23,8 +23,8 @@ export default function AppPage() {
         downloadState={state.downloadState}
         downloadProgress={state.downloadProgress}
         downloadText={state.downloadText}
-        onSaveKey={actions.setApiKey}
-        onClearKey={actions.clearApiKey}
+        localAIStatus={state.localAIStatus}
+        localAIInferring={state.localAIInferring}
         onEnableLocalAI={actions.enableLocalAI}
         onDisableLocalAI={actions.disableLocalAI}
         onSelectTier={actions.setSelectedTier}
@@ -37,6 +37,7 @@ export default function AppPage() {
         error={state.error}
         crisis={state.crisis}
         response={state.response}
+        localAIInferring={state.localAIInferring}
       />
     </SiteFrame>
   );
