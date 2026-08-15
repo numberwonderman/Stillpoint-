@@ -1,15 +1,9 @@
 // Stillpoint — "Local AI mode"
-// Uses WebLLM (WebGPU) if available, falls back to Transformers.js (CPU/WASM) if not.
+// Uses WebLLM (WebGPU) on the main thread if available, or falls back
+// to Transformers.js (CPU/WASM) running inside a dedicated Web Worker.
 
 import * as webllm from "@mlc-ai/web-llm";
-import { pipeline, env } from "@huggingface/transformers";
 import { detectDeviceTier } from "./deviceCapability";
-
-// Configure Transformers.js for optimal browser/CPU performance
-env.allowLocalModels = false;
-if (env.backends?.onnx?.wasm) {
-  env.backends.onnx.wasm.numThreads = 4;
-}
 
 export const MODEL_CATALOG = {
   tiny: {
@@ -50,11 +44,77 @@ const TIER_ORDER = ["tiny", "small", "medium", "large"];
 
 let engineType = null; // 'webgpu' or 'wasm'
 let engine = null;     // WebLLM instance
-let wasmEngine = null; // Transformers.js pipeline instance
 let isLoading = false;
 let isReady = false;
 let readyModelKey = null;
 let activeDownload = null; // { promise, cancelState }
+
+// ---- Worker plumbing for the WASM backend ----------------------------------
+//
+// We reuse a single Worker across init/dispose cycles within the same
+// session, so the WASM binary and tokenizer don't have to be re-parsed
+// every time the user toggles Local AI off and back on.
+let worker = null;
+let nextMessageId = 1;
+const pendingRequests = new Map(); // id -> { resolve, reject, onProgress? }
+
+function ensureWorker() {
+  if (worker) return worker;
+  worker = new Worker(
+    new URL("./workers/localaiWorker.js", import.meta.url),
+    { type: "module" }
+  );
+  worker.addEventListener("message", (event) => {
+    const { id, type, payload } = event.data || {};
+    if (typeof id !== "number") return;
+    const pending = pendingRequests.get(id);
+    if (!pending) return;
+
+    switch (type) {
+      case "progress":
+        pending.onProgress?.(payload);
+        break;
+      case "token":
+        // Streaming token chunk — fire callback but do NOT resolve;
+        // the request resolves only on the final `result` message.
+        pending.onToken?.(payload?.chunk ?? "");
+        break;
+      case "ready":
+        pending.resolve(payload);
+        pendingRequests.delete(id);
+        break;
+      case "result":
+        pending.resolve(payload);
+        pendingRequests.delete(id);
+        break;
+      case "disposed":
+        pending.resolve(payload);
+        pendingRequests.delete(id);
+        break;
+      case "error": {
+        pendingRequests.delete(id);
+        const err = new Error(payload?.message || "Worker error");
+        if (payload?.code) err.code = payload.code;
+        pending.reject(err);
+        break;
+      }
+      default:
+        // ignore unknown
+        break;
+    }
+  });
+  return worker;
+}
+
+function postToWorker(type, payload, { onProgress, onToken } = {}) {
+  const id = nextMessageId++;
+  const w = ensureWorker();
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(id, { resolve, reject, onProgress, onToken });
+    w.postMessage({ id, type, payload });
+  });
+}
+// ---------------------------------------------------------------------------
 
 const SYSTEM_INSTRUCTION = `
 You are a supportive, grounding presence for someone who is having a
@@ -135,16 +195,26 @@ export function cancelLocalAIDownload() {
       activeDownload.cancelState.cancelled = true;
     }
   }
+  // Also signal the worker to abort whatever it is doing.
+  try {
+    if (worker) {
+      const id = nextMessageId++;
+      worker.postMessage({ id, type: "cancel", payload: {} });
+    }
+  } catch {
+    /* worker might not exist yet — that's fine */
+  }
 }
 
 /**
  * Initializes the Local AI engine. Automatically routes to WebGPU (WebLLM)
- * if available, or falls back to WebAssembly CPU (Transformers.js) if not.
+ * if available, or falls back to WebAssembly CPU (Transformers.js) running
+ * in a dedicated Web Worker if not.
  */
 export async function initLocalAI(onProgress, options = {}) {
   const tier = options.tier && MODEL_CATALOG[options.tier] ? options.tier : "medium";
 
-  if (isReady && readyModelKey === tier) return engine || wasmEngine;
+  if (isReady && readyModelKey === tier) return engine;
   if (isLoading && activeDownload) return activeDownload.promise;
 
   if (isReady && readyModelKey !== tier) {
@@ -174,31 +244,45 @@ export async function initLocalAI(onProgress, options = {}) {
           throw new Error("cancelled");
         }
       } else {
+        // WASM path — runs in a Web Worker so the main thread stays
+        // responsive during the (potentially long) weight download and
+        // WebAssembly compilation.
         const cpuModelId = MODEL_CATALOG[tier].cpuId;
-        wasmEngine = await pipeline("text-generation", cpuModelId, {
-          device: "wasm",
-          dtype: "q4", // 4-bit quantized model for playable CPU performance
-          progress_callback: (report) => {
-            if (cancelState.cancelled) return;
-            if (onProgress && report.status === "progress") {
-              onProgress({
-                progress: (report.progress || 0) / 100,
-                text: `Downloading ${report.file || "weights"}…`,
-              });
-            }
-          },
-        });
+        await postToWorker(
+          "init",
+          { tier, modelId: cpuModelId },
+          {
+            onProgress: (report) => {
+              if (cancelState.cancelled) return;
+              if (!onProgress) return;
+              // Translate the worker's typed phases into the shape the
+              // hook already understands ({ progress, text }).
+              if (report.phase === "loading-weights" || report.phase === "downloading") {
+                onProgress({
+                  progress: report.progress ?? 0,
+                  text: report.text || `Loading on-device model…`,
+                });
+              } else if (report.phase === "compiling-wasm") {
+                onProgress({ progress: 0, text: "Compiling WebAssembly…" });
+              } else if (report.phase === "preparing") {
+                onProgress({ progress: 0, text: report.text || "Preparing on-device model…" });
+              } else if (report.phase === "ready") {
+                onProgress({ progress: 1, text: "Ready on-device." });
+              }
+            },
+          }
+        );
 
         if (cancelState.cancelled) {
-          if (wasmEngine.dispose) await wasmEngine.dispose();
-          wasmEngine = null;
+          // Worker has already disposed internally and replied with an
+          // error of code "cancelled" — we re-throw to signal cancel.
           throw new Error("cancelled");
         }
       }
 
       isReady = true;
       readyModelKey = tier;
-      return engine || wasmEngine;
+      return engine;
     } finally {
       isLoading = false;
       activeDownload = null;
@@ -211,8 +295,10 @@ export async function initLocalAI(onProgress, options = {}) {
 
 /**
  * Generates a supportive response on-device using whichever engine was initialized.
+ * For the WASM path, `onToken(chunk)` is invoked for each decoded word chunk
+ * as the model produces it, so the caller can stream the response to the UI.
  */
-export async function generateLocal(prompt) {
+export async function generateLocal(prompt, onToken) {
   if (!isReady) {
     throw new Error("Local AI engine not initialized. Call initLocalAI() first.");
   }
@@ -229,13 +315,16 @@ export async function generateLocal(prompt) {
       max_tokens: 120,
     });
     return response.choices[0]?.message?.content ?? "";
-  } else if (wasmEngine) {
-    const response = await wasmEngine(messages, {
-      max_new_tokens: 120,
-      temperature: 0.7,
-      do_sample: true,
-    });
-    return response[0]?.generated_text?.at(-1)?.content ?? "";
+  } else if (engineType === "wasm") {
+    const { text } = await postToWorker(
+      "generate",
+      {
+        messages,
+        options: { max_new_tokens: 120, temperature: 0.7, do_sample: true },
+      },
+      { onToken }
+    );
+    return text || "";
   }
 
   throw new Error("No active local engine available.");
@@ -249,9 +338,12 @@ export async function unloadLocalAI() {
     await engine.unload();
     engine = null;
   }
-  if (wasmEngine) {
-    if (wasmEngine.dispose) await wasmEngine.dispose();
-    wasmEngine = null;
+  if (engineType === "wasm" && worker) {
+    try {
+      await postToWorker("dispose", {});
+    } catch {
+      /* ignore */
+    }
   }
   isReady = false;
   readyModelKey = null;
