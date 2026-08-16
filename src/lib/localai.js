@@ -118,10 +118,9 @@ function postToWorker(type, payload, { onProgress, onToken } = {}) {
 
 const SYSTEM_INSTRUCTION = `
 You are a supportive, grounding presence for someone who is having a
-difficult emotional moment. You will receive only a small structured
-summary — never the person's own words — describing broad emotion
-categories, an intensity level, any emotions they explicitly said they
-do NOT feel, and a general context tag.
+difficult emotional moment. The user will share what they're feeling in
+their own words. Respond directly to what they wrote — do not analyze,
+summarize, or restate their words back to them.
 
 Rules you must follow:
 - Do not diagnose, label, or speculate about any mental health condition.
@@ -129,18 +128,16 @@ Rules you must follow:
 - Keep your response short: 2-4 sentences.
 - Be warm and validating without being clinical or generic.
 - Do not ask the person to describe their situation further; respond to
-  what's already summarized.
-- Do not reference "the JSON object," "the data I was given," or the
-  structured summary itself — respond as if naturally supporting a
-  person, not analyzing a data payload.
+  what they've already shared.
+- Do not reference "the input," "the data I was given," or the prompt
+  itself — respond as if naturally supporting a person, not analyzing
+  a text payload.
 - Never mention that you are an AI, a language model, or that you lack
   emotions. Just respond supportively.
-- If contextTag is "general_distress", do not guess at a specific cause.
-- If noEmotionsDetected is true, no specific emotion was recognized in
-  what the person wrote. Do NOT assume distress, sadness, or any
-  negative state in this case. Respond with brief, warm, neutral
-  acknowledgment instead (e.g. thanking them for checking in), and do
-  not invent feelings they didn't express.
+- If the person expresses something serious but not a crisis, respond
+  gently and stay with them in the feeling rather than offering fixes.
+- Crisis situations are handled before this prompt is ever shown, so
+  you don't need to render crisis resources yourself.
 `.trim();
 
 /**
@@ -187,7 +184,11 @@ export function getReadyModelKey() {
 }
 
 /**
- * Cancels the currently active download/initialization process.
+ * Cancels the currently active download/initialization process AND any
+ * in-flight generation. Safe to call from the crisis-gate path: if the
+ * user submits crisis text mid-generation, this stops the worker before
+ * the local model can finish streaming a response that would otherwise
+ * be visible alongside the crisis panel.
  */
 export function cancelLocalAIDownload() {
   if (activeDownload) {
@@ -195,7 +196,9 @@ export function cancelLocalAIDownload() {
       activeDownload.cancelState.cancelled = true;
     }
   }
-  // Also signal the worker to abort whatever it is doing.
+  // Signal the worker to abort whatever it is doing — init or generate.
+  // The worker checks the cancel flag inside its token-stream callback,
+  // so the next chunk is the last one to reach the main thread.
   try {
     if (worker) {
       const id = nextMessageId++;
@@ -204,6 +207,15 @@ export function cancelLocalAIDownload() {
   } catch {
     /* worker might not exist yet — that's fine */
   }
+}
+
+/**
+ * Aborts any in-flight generation. Equivalent to cancelLocalAIDownload()
+ * for the abort step, but named to reflect intent when the call comes
+ * from the crisis-gate path (not a user-initiated cancel).
+ */
+export function abortLocalAIInfight() {
+  cancelLocalAIDownload();
 }
 
 /**
