@@ -38,6 +38,7 @@ export default function AppPage() {
         crisis={state.crisis}
         response={state.response}
         localAIInferring={state.localAIInferring}
+        localAIStopped={state.localAIStopped}
       />
     </SiteFrame>
   );
