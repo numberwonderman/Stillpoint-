@@ -1,9 +1,21 @@
 /**
  * parser.js — Stillpoint
  *
- * Turns raw user text into the minimal structured summary sent to
- * gemini.js. Raw text NEVER leaves this module except to be discarded —
- * only the structured output crosses into the network-calling code.
+ * Turns raw user text into a minimal structured summary. Pure and
+ * synchronous — no I/O, no network. Used in two places:
+ *
+ *   1. The browser (useStillpoint.js) — runs the crisis gate on the raw
+ *      text before either branch (cloud or local AI) is taken, so a
+ *      person who needs immediate help gets local resources even if
+ *      they aren't signed in or the network is down.
+ *   2. The server (app/api/support/route.js) — runs the full parser
+ *      on the raw text from the cloud path. The structured output is
+ *      what Gemini receives; the raw text is held only for the
+ *      request's duration and is never logged or persisted.
+ *
+ * The local-AI path also runs the crisis gate here before feeding raw
+ * text directly to the on-device model. parser.js never talks to a
+ * network — it only reads from lexicon.js and returns a plain object.
  *
  * Flow (strictly linear, fail-safe):
  *   1. Crisis gate (first, always, ignores negation)

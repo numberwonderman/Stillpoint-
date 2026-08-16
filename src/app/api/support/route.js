@@ -9,15 +9,26 @@
  *     own key — any signed-in user gets to use the cloud path.
  *   - The session cookie (set by /api/auth/login or /api/auth/signup) is
  *     the gatekeeper: only authenticated users may call this route.
- *   - This route only ever receives the *structured* summary from
- *     parser.js, never raw user text — see the privacy contract in
- *     useStillpoint.js.
+ *   - The route is the only place that calls parser.js for the cloud path.
+ *     The browser sends raw user text here, parser.js turns it into a
+ *     minimal structured summary on this server, and only that summary is
+ *     forwarded to Gemini. Raw text never leaves this process — it is
+ *     never logged and never persisted.
+ *   - For the Local AI path, raw text stays on-device and is fed directly
+ *     to the on-device model by the client (see useStillpoint.js). The
+ *     server is not involved on that path.
  */
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { GoogleGenAI } from "@google/genai";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/auth";
+import { parseInput } from "@/lib/parser";
+import {
+  CONTEXT_TAGS,
+  EMOTION_BUCKETS,
+  INTENSITY_MODIFIERS,
+} from "@/lib/lexicon";
 
 export const runtime = "nodejs";
 
@@ -61,13 +72,51 @@ export async function POST(request) {
     );
   }
 
-  // 2. Parse the JSON body, which must be a structured summary from parser.js.
-  let summary;
+  // 2. Parse the JSON body, which is the user's raw text input. We run
+  //    parser.js on this server to convert it into a minimal structured
+  //    summary that Gemini will receive. Raw text is held only in this
+  //    request's scope and is never logged or persisted.
+  let body;
   try {
-    summary = await request.json();
+    body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
+
+  const rawText = body && typeof body.text === "string" ? body.text : "";
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    return NextResponse.json(
+      { error: "Please enter how you're feeling before submitting." },
+      { status: 400 }
+    );
+  }
+  if (trimmed.length > 4000) {
+    // Cap input length so a single bad request can't pin a server thread
+    // or balloon a Gemini prompt. The textarea in the UI is already short;
+    // this is a server-side guardrail.
+    return NextResponse.json(
+      { error: "That message is too long. Please shorten it and try again." },
+      { status: 413 }
+    );
+  }
+
+  const parsed = parseInput(trimmed);
+
+  // If the crisis gate fired, do not call Gemini at all. Surface the
+  // canonical crisis response so the client can render local resources
+  // the same way it does for the local-only path.
+  if (parsed.isCrisis) {
+    return NextResponse.json({ isCrisis: true }, { status: 200 });
+  }
+
+  const summary = {
+    emotions: parsed.emotions,
+    intensity: parsed.intensity,
+    negated: parsed.negated,
+    contextTag: parsed.contextTag,
+    noEmotionsDetected: parsed.noEmotionsDetected,
+  };
 
   try {
     validateSummaryShape(summary);
@@ -158,6 +207,37 @@ function validateSummaryShape(summary) {
     }
   }
   if (!Array.isArray(summary.emotions) || !Array.isArray(summary.negated)) {
+    throw new Error("Structured summary fields are malformed.");
+  }
+
+  // Enum-constrain every field. This is the abuse-mitigation surface:
+  // even if someone bypasses the parser and submits an arbitrary object,
+  // Gemini only ever sees a value from these closed sets. Caps on array
+  // length keep a crafted prompt from inflating the prompt payload.
+  const emotionBuckets = new Set(Object.keys(EMOTION_BUCKETS));
+  const intensityLevels = new Set(Object.keys(INTENSITY_MODIFIERS));
+  const contextTags = new Set(Object.keys(CONTEXT_TAGS));
+
+  if (summary.emotions.length > 8 || summary.negated.length > 8) {
+    throw new Error("Structured summary fields are malformed.");
+  }
+  for (const e of summary.emotions) {
+    if (typeof e !== "string" || !emotionBuckets.has(e)) {
+      throw new Error("Structured summary fields are malformed.");
+    }
+  }
+  for (const n of summary.negated) {
+    if (typeof n !== "string" || n.length === 0 || n.length > 64) {
+      throw new Error("Structured summary fields are malformed.");
+    }
+  }
+  if (typeof summary.intensity !== "string" || !intensityLevels.has(summary.intensity)) {
+    throw new Error("Structured summary fields are malformed.");
+  }
+  if (typeof summary.contextTag !== "string" || !contextTags.has(summary.contextTag)) {
+    throw new Error("Structured summary fields are malformed.");
+  }
+  if (summary.noEmotionsDetected !== undefined && typeof summary.noEmotionsDetected !== "boolean") {
     throw new Error("Structured summary fields are malformed.");
   }
 }

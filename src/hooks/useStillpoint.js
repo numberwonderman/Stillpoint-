@@ -2,17 +2,23 @@
  * useStillpoint — client-side orchestration hook
  *
  * Replaces the imperative body of the old app.js. Wires together:
- *   parser.js   -> turns raw input into a structured summary (or crisis flag)
- *   /api/support -> turns a structured summary into a supportive response
- *                   (cloud, server-held Gemini key, auth-gated)
- *   localai.js  -> turns a structured summary into a supportive response
- *                   (on-device, optional, runs in a Web Worker for the
- *                   WASM path so the main thread stays responsive)
- *   JSX         -> renders whichever state is active via returned `state`
+ *   /api/support -> cloud path. The server receives raw text, runs
+ *                   parser.js, and forwards a structured summary to
+ *                   Gemini (auth-gated; key lives on the server).
+ *   localai.js   -> on-device path. Raw text is fed directly to the
+ *                   local model in the browser/Web Worker; the server
+ *                   is not involved at all.
+ *   client-side  -> the crisis gate runs here on the raw text before
+ *                   either branch is taken, so a person who needs
+ *                   immediate help gets the local resources even if
+ *                   they aren't signed in or the network is down.
+ *   JSX          -> renders whichever state is active via returned `state`
  *
  * Privacy contract:
- *   - Raw user text is handled here only briefly, then handed to parser.js.
- *   - It is never sent to /api/support or localai.js, and never logged.
+ *   - Cloud path: raw text is sent to /api/support. The server holds it
+ *     only for the duration of that request, never logs or persists it,
+ *     and forwards only the structured summary to Gemini.
+ *   - Local-AI path: raw text never leaves the device.
  *   - The Gemini API key is held only on the server; the client never sees
  *     it. /api/support authenticates the request with the httpOnly session
  *     cookie set by /api/auth/login or /api/auth/signup.
@@ -30,6 +36,7 @@ import {
   getReadyModelKey,
   generateLocal,
   cancelLocalAIDownload,
+  abortLocalAIInfight,
   unloadLocalAI,
 } from "@/lib/localai";
 
@@ -57,6 +64,10 @@ export function useStillpoint() {
   // the progress bar has stopped moving.
   const [localAIStatus, setLocalAIStatus] = useState("idle"); // idle | preparing | downloading | thinking | disposing
   const [localAIInferring, setLocalAIInferring] = useState(false);
+  // Set true when the crisis gate aborts an in-flight local-AI generation,
+  // so the crisis panel can tell the user the on-device response was
+  // stopped. Cleared the next time they submit non-crisis text.
+  const [localAIStopped, setLocalAIStopped] = useState(false);
 
   // WebGPU availability check is browser-only and never changes for the
   // lifetime of the page, so it's safe to compute once on mount.
@@ -138,11 +149,24 @@ export function useStillpoint() {
       return;
     }
 
-    // parser.js is the sole consumer of raw text. Nothing downstream
-    // ever sees it again.
+    // Client-side crisis gate. Runs on the raw text before either branch
+    // is taken, so a person who needs immediate help gets local resources
+    // even if they aren't signed in or the network is down. The server
+    // runs the same gate independently on its side as a second line of
+    // defense — both must agree.
     const result = parseInput(trimmed);
 
     if (result.isCrisis) {
+      // HARD STOP. If a local-AI generation is in flight (e.g. the user
+      // submitted a follow-up that turned out to be crisis text), abort
+      // it now so the streaming response doesn't remain visible while
+      // the crisis panel is shown.
+      if (useLocalAIRef.current || localAIInferring) {
+        abortLocalAIInfight();
+        setLocalAIStopped(true);
+      }
+      setLocalAIInferring(false);
+      setLocalAIStatus("idle");
       setCrisis(true);
       setStatus("");
       setError("");
@@ -150,12 +174,15 @@ export function useStillpoint() {
       return; // Neither /api/support nor Local AI is ever called on this path.
     }
 
+    // Non-crisis path clears the "we stopped the model" flag so the next
+    // crisis event starts fresh.
+    setLocalAIStopped(false);
     setCrisis(false);
     setError("");
 
     if (useLocalAIRef.current) {
       await runLocalAI(
-        result,
+        trimmed,
         selectedTier,
         setStatus,
         setError,
@@ -164,14 +191,16 @@ export function useStillpoint() {
         setDownloadProgress,
         setDownloadText,
         setLocalAIStatus,
-        setLocalAIInferring
+        setLocalAIInferring,
+        setCrisis,
+        setLocalAIStopped
       );
       return;
     }
 
-    await runCloud(result, setStatus, setError, setResponse);
+    await runCloud(trimmed, setStatus, setError, setResponse, setCrisis);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTier]);
+  }, [selectedTier, localAIInferring]);
 
   return {
     state: {
@@ -189,6 +218,7 @@ export function useStillpoint() {
       downloadText,
       localAIStatus,
       localAIInferring,
+      localAIStopped,
     },
     actions: {
       submit,
@@ -206,7 +236,7 @@ export function useStillpoint() {
 // body so the hook itself stays scannable.
 // ---------------------------------------------------------------------------
 
-async function runCloud(result, setStatus, setError, setResponse) {
+async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis) {
   setStatus("Getting a response…");
   setResponse("");
 
@@ -214,9 +244,11 @@ async function runCloud(result, setStatus, setError, setResponse) {
     const res = await fetch("/api/support", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // Only the structured summary crosses the network boundary — no raw
-      // user text, no API key (the key lives server-side).
-      body: JSON.stringify(result),
+      // Raw text crosses the network to /api/support so the server can
+      // run parser.js. The server is the only thing that calls parser.js
+      // for the cloud path — the client never pre-processes for Gemini.
+      // The API key lives only on the server (httpOnly cookie auth).
+      body: JSON.stringify({ text: trimmed }),
     });
     const data = await res.json().catch(() => ({}));
 
@@ -230,6 +262,11 @@ async function runCloud(result, setStatus, setError, setResponse) {
       setStatus("");
       return;
     }
+    if (data.isCrisis) {
+      setCrisis(true);
+      setStatus("");
+      return;
+    }
 
     setResponse(data.text || "");
     setStatus("");
@@ -240,7 +277,7 @@ async function runCloud(result, setStatus, setError, setResponse) {
 }
 
 async function runLocalAI(
-  result,
+  trimmed,
   tier,
   setStatus,
   setError,
@@ -249,12 +286,35 @@ async function runLocalAI(
   setDownloadProgress,
   setDownloadText,
   setLocalAIStatus,
-  setLocalAIInferring
+  setLocalAIInferring,
+  setCrisis,
+  setLocalAIStopped
 ) {
   if (!isLocalAISupported()) {
     setError("Local AI mode isn't supported in this browser. Switch to Cloud in Settings.");
     return;
   }
+
+  // Defense-in-depth: re-run the crisis gate immediately before handing
+  // raw text to the on-device model. submit() already checked, but if
+  // runLocalAI is ever invoked from anywhere else (or if a future refactor
+  // changes the call site), this hard stop keeps the local model from
+  // ever seeing crisis text.
+  const gate = parseInput(trimmed);
+  if (gate.isCrisis) {
+    abortLocalAIInfight();
+    setLocalAIStopped(true);
+    setLocalAIInferring(false);
+    setLocalAIStatus("idle");
+    setCrisis(true);
+    setStatus("");
+    setError("");
+    setResponse("");
+    return;
+  }
+  // Defense-in-depth path also clears the flag if it had been left set
+  // from a previous crisis event but the new input is non-crisis.
+  setLocalAIStopped(false);
 
   try {
     if (!isLocalAIReady() || getReadyModelKey() !== tier) {
@@ -282,15 +342,17 @@ async function runLocalAI(
     setLocalAIInferring(true);
     setStatus("Thinking on-device…");
     setResponse("");
+    // Raw text is fed directly to the on-device model. Nothing leaves
+    // the browser on this path — the server is not involved at all.
     // Stream each decoded word chunk into the response state as the
     // worker emits it, so the user sees the reply appear word-by-word
     // rather than all at once when the model finishes.
-    const text = await generateLocal(JSON.stringify(result), (chunk) => {
+    const text = await generateLocal(trimmed, (chunk) => {
       setResponse((prev) => (prev || "") + chunk);
     });
     // The worker also returns a final canonical text; only adopt it
     // if streaming somehow didn't populate anything (e.g. very short
-    // outputs that arrive in a single chunk after `result`).
+    // outputs that arrive in a single chunk after `text`).
     setResponse((prev) => (prev && prev.length > 0 ? prev : text || ""));
     setStatus("");
   } catch (err) {

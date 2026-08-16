@@ -5,8 +5,10 @@
  * parser.js is the only file that reads from this module.
  *
  * IMPORTANT: Editing these lists changes what the crisis gate catches
- * and what gets sent (as tags, never raw text) to Gemini. Treat
- * CRISIS_TERMS changes with extra care — err toward over-inclusion.
+ * and what gets sent (as enum-constrained values, never raw text) to
+ * Gemini. Treat CRISIS_TERMS changes with extra care — err toward
+ * over-inclusion. The route also uses EMOTION_BUCKETS, INTENSITY_MODIFIERS,
+ * and CONTEXT_TAGS to validate the summary it forwards to Gemini.
  */
 
 // ---------------------------------------------------------------------------
