@@ -9,9 +9,9 @@ export const metadata = {
 const FEATURES = [
   {
     icon: "🔒",
-    title: "Private by design",
+    title: "Minimal signal",
     body:
-      "Your raw words never leave your device. Only a short, general emotion summary is ever sent — and never during a crisis.",
+      "On the cloud path, only a short, general emotion summary is ever sent to Gemini — never your raw words — and never during a crisis.",
   },
   {
     icon: "💻",
@@ -47,8 +47,8 @@ export default function LandingPage() {
         </h1>
         <p className="mx-auto mb-8 max-w-[520px] text-lg text-text-muted">
           Stillpoint helps you put words to a hard moment and get a short,
-          grounding response back — privately. Your words stay on your
-          device; nothing you write is ever stored.
+          grounding response back — privately. Choose cloud or on-device;
+          nothing you write is ever stored.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           <Link
@@ -92,12 +92,12 @@ export default function LandingPage() {
         <h2 className="mb-6 text-center text-[1.75rem] font-bold">How it works</h2>
         <ol className="m-0 grid gap-4 p-0" style={{ listStyle: "none" }}>
           <Step n="1" title="Write how you're feeling">
-            Nothing you type leaves your device — it&apos;s parsed locally into a
-            short emotional summary.
+            If you&apos;re in crisis, Stillpoint stops here and shows you
+            local resources — no AI is called.
           </Step>
           <Step n="2" title="Choose cloud or on-device">
-            Use your own free Gemini key, or switch to Local AI mode to run a
-            small model entirely in your browser.
+            Use the cloud path with a server-held Gemini key, or switch to
+            Local AI mode to run a small model entirely in your browser.
           </Step>
           <Step n="3" title="Get a grounding response">
             A short, warm response comes back in seconds — never clinical,
@@ -118,8 +118,9 @@ export default function LandingPage() {
 
       <footer className="mx-auto max-w-[640px] border-t border-border px-6 py-6 pb-12 text-center text-sm text-text-muted">
         <p className="m-0">
-          Stillpoint keeps your words on your device. Only a short, general
-          summary of your emotions is ever sent — and never during a crisis.
+          On the cloud path, only a short, general summary of your emotions
+          is ever sent to Gemini — and never during a crisis. Use Local AI
+          mode to keep everything on your device.
         </p>
       </footer>
     </main>
