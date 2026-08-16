@@ -69,10 +69,37 @@ export function useStillpoint() {
   // stopped. Cleared the next time they submit non-crisis text.
   const [localAIStopped, setLocalAIStopped] = useState(false);
 
+  // Crisis region: "us" | "intl" | null. Persisted in localStorage so
+  // the user doesn't have to re-pick each time. `null` means "haven't
+  // asked yet" and the panel will prompt on first render.
+  const [crisisRegion, setCrisisRegion] = useState(null);
+
   // WebGPU availability check is browser-only and never changes for the
   // lifetime of the page, so it's safe to compute once on mount.
   useEffect(() => {
     setLocalAISupported(isLocalAISupported());
+  }, []);
+
+  // Restore persisted crisis-region preference (so the user doesn't have
+  // to re-pick each time the crisis panel shows).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("stillpoint:crisisRegion");
+      if (saved === "us" || saved === "intl") {
+        setCrisisRegion(saved);
+      }
+    } catch {
+      /* localStorage unavailable (private mode, etc.) — fall back to ask */
+    }
+  }, []);
+
+  const chooseCrisisRegion = useCallback((region) => {
+    setCrisisRegion(region);
+    try {
+      window.localStorage.setItem("stillpoint:crisisRegion", region);
+    } catch {
+      /* best-effort persistence */
+    }
   }, []);
 
   // ---- Actions -------------------------------------------------------------
@@ -219,6 +246,7 @@ export function useStillpoint() {
       localAIStatus,
       localAIInferring,
       localAIStopped,
+      crisisRegion,
     },
     actions: {
       submit,
@@ -227,6 +255,7 @@ export function useStillpoint() {
       setSelectedTier,
       startDownload,
       cancelDownload,
+      chooseCrisisRegion,
     },
   };
 }

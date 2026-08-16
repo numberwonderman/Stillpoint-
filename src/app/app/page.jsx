@@ -39,6 +39,8 @@ export default function AppPage() {
         response={state.response}
         localAIInferring={state.localAIInferring}
         localAIStopped={state.localAIStopped}
+        crisisRegion={state.crisisRegion}
+        onChooseCrisisRegion={actions.chooseCrisisRegion}
       />
     </SiteFrame>
   );
