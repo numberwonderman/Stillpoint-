@@ -65,7 +65,7 @@ export default function LandingPage() {
           </Link>
         </div>
         <p className="mt-4 text-[0.9rem] text-text-muted">
-          No account needed to use the tool localy. Ever.
+          No account needed to use the tool locally. Ever.
         </p>
       </section>
 
