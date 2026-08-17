@@ -20,11 +20,26 @@ import ThinkingIndicator from "./ThinkingIndicator";
  *   4. A "More options" disclosure that opens a tidy list of every
  *      other resource — crisis text lines, specialized lines, what to
  *      expect, alternatives to calling.
+ *
+ * Design notes:
+ *   - Warm peach palette (replaces the previous harsh red). The visual
+ *     language is "I see you" — gentle, grounded, present — not
+ *     "WARNING". The two accents we still use (a calm teal sage for
+ *     the breathing ring) and the peach form a low-contrast duet that
+ *     reads as the same Stillpoint family.
+ *   - Severity-aware: when the parser returns "imminent" or "high", the
+ *     panel foregrounds the most-direct action (call 988 / 911) and
+ *     shows a softer supporting line. At "elevated" the layout stays
+ *     the same but the headline is less urgent.
+ *   - Larger breathing room, calmer headings (sentences, not alarms),
+ *     and a visible region badge so the user always knows the panel
+ *     is showing the right resources for where they are.
  */
 export default function ResponseSection({
   status,
   error,
   crisis,
+  crisisSeverity,
   response,
   localAIInferring,
   localAIStopped,
@@ -66,6 +81,7 @@ export default function ResponseSection({
       <div id="output" aria-live="polite">
         {crisis ? (
           <CrisisPanel
+            severity={crisisSeverity}
             localAIStopped={localAIStopped}
             region={crisisRegion}
             onChooseRegion={onChooseCrisisRegion}
@@ -187,8 +203,37 @@ const INTL_HELPLINES = [
   },
 ];
 
-function CrisisPanel({ localAIStopped, region, onChooseRegion }) {
+// Severity-driven copy. All three tiers keep the same warm, validating
+// tone — what changes is which line comes first and how much guidance
+// the panel leads with. "imminent" surfaces the 911 number inline.
+const SEVERITY_COPY = {
+  imminent: {
+    eyebrow: "Right now, in this moment",
+    headline: "Please reach out. You matter.",
+    body:
+      "If you might act on this, calling 911 or 988 connects you with someone who can stay on the line with you. It’s free, confidential, and available right now.",
+  },
+  high: {
+    eyebrow: "We hear you",
+    headline: "You’re not alone right now",
+    body:
+      "Please reach out. You don’t have to be in immediate danger to call or text. The people on the other end are trained for exactly this — and they won’t judge.",
+  },
+  elevated: {
+    eyebrow: "A gentler place to start",
+    headline: "You don’t have to figure this out by yourself",
+    body:
+      "It sounds like things feel heavy. If you’d like to talk, the resources below are free, confidential, and available 24/7.",
+  },
+};
+
+function CrisisPanel({ severity, localAIStopped, region, onChooseRegion }) {
   const [copied, setCopied] = useState(false);
+  // Default to "elevated" if the server didn't pass severity (older
+  // clients, partial responses). The panel still works — it just
+  // defaults to the gentlest framing.
+  const tier = severity && SEVERITY_COPY[severity] ? severity : "elevated";
+  const copy = SEVERITY_COPY[tier];
 
   async function copyResources() {
     try {
@@ -202,42 +247,81 @@ function CrisisPanel({ localAIStopped, region, onChooseRegion }) {
 
   return (
     <div
-      className="crisis-panel rounded-[12px] border-2 border-crisis bg-crisis-bg p-5 leading-relaxed sm:p-6"
+      className="crisis-panel relative overflow-hidden rounded-[16px] border border-crisis/40 bg-crisis-bg shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5)]"
       role="alert"
       aria-labelledby="crisis-heading"
     >
-      <h2
-        id="crisis-heading"
-        className="mb-3 mt-0 text-[1.5rem] font-bold leading-tight text-crisis sm:text-[1.625rem]"
-      >
-        You&apos;re not alone right now
-      </h2>
-      <p className="mb-5 text-[1.0625rem] leading-relaxed text-text">
-        Please reach out. You don&apos;t have to be in immediate danger to
-        call or text.
-      </p>
+      {/* Soft warm wash at the top of the panel — replaces the previous
+          hard red banner. Purely decorative. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-crisis/15 to-transparent"
+      />
 
-      {localAIStopped && (
-        <p
-          className="mb-5 rounded-[8px] border border-crisis/40 bg-bg/60 p-3 text-[0.95rem] leading-relaxed"
-          data-testid="crisis-local-stopped"
-        >
-          <strong>Heads up:</strong> the on-device response was stopped the
-          moment this page recognized what you wrote. Nothing about what you
-          wrote left your browser. The resources below are the only thing on
-          screen now.
+      <div className="relative px-6 py-7 sm:px-7 sm:py-8">
+        {/* Eyebrow + headline. Eyebrow is small, all-caps, letter-spaced —
+            a quiet label, not a flashing alert. */}
+        <p className="mb-2 text-[0.75rem] font-bold uppercase tracking-[0.18em] text-crisis">
+          {copy.eyebrow}
         </p>
-      )}
+        <h2
+          id="crisis-heading"
+          className="mb-3 mt-0 text-[1.625rem] font-bold leading-[1.2] text-text sm:text-[1.75rem]"
+        >
+          {copy.headline}
+        </h2>
+        <p className="mb-6 max-w-[60ch] text-[1.0625rem] leading-relaxed text-text/90">
+          {copy.body}
+        </p>
 
-      {!region ? (
-        <RegionChooser onChoose={onChooseRegion} />
-      ) : (
-        <PrimaryResource region={region} />
-      )}
+        {localAIStopped && (
+          <div
+            className="mb-6 rounded-[10px] border border-crisis/30 bg-bg/50 p-3.5 text-[0.95rem] leading-relaxed text-text/90"
+            data-testid="crisis-local-stopped"
+          >
+            <p className="m-0">
+              <strong className="font-bold text-text">A note about your privacy:</strong>{" "}
+              <span className="text-text/80">
+                the on-device response was stopped the moment this page
+                recognized what you wrote. Nothing about what you wrote left
+                your browser. The resources below are the only thing on
+                screen now.
+              </span>
+            </p>
+          </div>
+        )}
 
-      <HelplineList region={region} />
+        {/* 911 inline callout — only surfaced at "imminent" severity.
+            At "high" and "elevated" the user still sees 911 in the
+            helpline list below, but we don't lead with it. */}
+        {tier === "imminent" && (
+          <div className="mb-6 rounded-[10px] border border-crisis/40 bg-crisis-soft/60 p-4">
+            <p className="mb-1 text-[0.95rem] font-bold text-text">
+              If you might act on this right now
+            </p>
+            <p className="mb-3 text-[0.95rem] leading-relaxed text-text/80">
+              Call <strong>911</strong> and tell them where you are. They can
+              stay on the line with you while help is on the way.
+            </p>
+            <a
+              href="tel:911"
+              className="inline-flex min-h-[3rem] items-center justify-center rounded-[10px] border-2 border-crisis bg-transparent px-5 py-2.5 text-[1.0625rem] font-bold text-crisis transition-colors hover:bg-crisis hover:text-bg"
+            >
+              Call 911
+            </a>
+          </div>
+        )}
 
-      <DetailsDisclosure region={region} onSwitchRegion={onChooseRegion} onCopy={copyResources} copied={copied} />
+        {!region ? (
+          <RegionChooser onChoose={onChooseRegion} />
+        ) : (
+          <PrimaryResource region={region} severity={tier} />
+        )}
+
+        <HelplineList region={region} severity={tier} />
+
+        <DetailsDisclosure region={region} onSwitchRegion={onChooseRegion} onCopy={copyResources} copied={copied} />
+      </div>
     </div>
   );
 }
@@ -248,25 +332,25 @@ function CrisisPanel({ localAIStopped, region, onChooseRegion }) {
 // ---------------------------------------------------------------------------
 function RegionChooser({ onChoose }) {
   return (
-    <div className="mb-5 rounded-[10px] border border-crisis/30 bg-bg/70 p-4 sm:p-5">
+    <div className="mb-5 rounded-[12px] border border-border/60 bg-bg/70 p-4 sm:p-5">
       <p className="mb-1 text-[1.0625rem] font-bold leading-snug text-text">
         Where are you right now?
       </p>
       <p className="mb-4 text-[0.95rem] leading-relaxed text-text-muted">
-        This picks the right emergency number.
+        This picks the right emergency number for you.
       </p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <button
           type="button"
           onClick={() => onChoose("us")}
-          className="min-h-[3.25rem] rounded-[10px] border-2 border-accent bg-accent px-4 py-3 text-[1.0625rem] font-bold leading-snug text-bg transition-colors hover:bg-accent-strong hover:text-text"
+          className="min-h-[3.25rem] rounded-[10px] border-2 border-accent bg-accent px-4 py-3 text-[1.0625rem] font-bold leading-snug text-bg transition-colors hover:bg-accent-strong"
         >
           I&apos;m in the US
         </button>
         <button
           type="button"
           onClick={() => onChoose("intl")}
-          className="min-h-[3.25rem] rounded-[10px] border-2 border-border bg-bg px-4 py-3 text-[1.0625rem] font-bold leading-snug text-text transition-colors hover:border-accent"
+          className="min-h-[3.25rem] rounded-[10px] border-2 border-border bg-bg px-4 py-3 text-[1.0625rem] font-bold leading-snug text-text transition-colors hover:border-accent hover:text-accent"
         >
           I&apos;m outside the US
         </button>
@@ -279,34 +363,41 @@ function RegionChooser({ onChoose }) {
 // PrimaryResource — the single most-likely-helpful action for the region.
 // Big tap targets, real tel:/sms:/https deep-links.
 // ---------------------------------------------------------------------------
-function PrimaryResource({ region }) {
+function PrimaryResource({ region, severity }) {
+  const tag = severity === "imminent" ? "Right now" : "Call or text right now";
+
   if (region === "us") {
     return (
-      <div className="mb-5 rounded-[10px] border-2 border-crisis bg-bg p-4 sm:p-5">
-        <p className="mb-2 text-[0.8125rem] font-bold uppercase tracking-wider text-crisis">
-          Call or text right now
-        </p>
-        <h3 className="mb-1 text-[1.25rem] font-bold leading-tight text-text sm:text-[1.375rem]">
+      <div className="mb-5 rounded-[12px] border-2 border-crisis/50 bg-crisis-soft/40 p-5 sm:p-6">
+        <div className="mb-3 flex items-center gap-2">
+          <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-crisis animate-pulse" />
+          <p className="m-0 text-[0.75rem] font-bold uppercase tracking-[0.16em] text-crisis">
+            {tag}
+          </p>
+        </div>
+        <h3 className="mb-1 text-[1.375rem] font-bold leading-tight text-text sm:text-[1.5rem]">
           {US_PRIMARY.name}
         </h3>
-        <p className="mb-4 text-[1rem] leading-relaxed text-text">
+        <p className="mb-5 text-[1rem] leading-relaxed text-text/85">
           {US_PRIMARY.for}
         </p>
-        <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="mb-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           <a
             href={US_PRIMARY.callHref}
-            className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[10px] bg-crisis px-4 py-3 text-[1.0625rem] font-bold text-bg transition-colors hover:opacity-90"
+            className="inline-flex min-h-[3.5rem] items-center justify-center gap-2 rounded-[10px] bg-crisis px-4 py-3 text-[1.0625rem] font-bold text-bg shadow-sm transition-all hover:bg-crisis-strong hover:shadow-md focus-visible:outline-2 focus-visible:outline-focus"
           >
-            {US_PRIMARY.callLabel}
+            <span aria-hidden="true" className="text-[1.2em] leading-none">📞</span>
+            <span>{US_PRIMARY.callLabel}</span>
           </a>
           <a
             href={US_PRIMARY.smsHref}
-            className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[10px] border-2 border-crisis px-4 py-3 text-[1.0625rem] font-bold text-crisis transition-colors hover:bg-crisis hover:text-bg"
+            className="inline-flex min-h-[3.5rem] items-center justify-center gap-2 rounded-[10px] border-2 border-crisis bg-transparent px-4 py-3 text-[1.0625rem] font-bold text-crisis transition-colors hover:bg-crisis hover:text-bg"
           >
-            {US_PRIMARY.smsLabel}
+            <span aria-hidden="true" className="text-[1.1em] leading-none">💬</span>
+            <span>{US_PRIMARY.smsLabel}</span>
           </a>
         </div>
-        <p className="mt-3 text-[0.875rem] leading-relaxed text-text-muted">
+        <p className="mt-3 text-[0.875rem] leading-relaxed text-text/70">
           {US_PRIMARY.meta}. Not sure what to say?{" "}
           <em>&ldquo;I&apos;m not okay and I don&apos;t know what to do.&rdquo;</em> works.
         </p>
@@ -316,25 +407,29 @@ function PrimaryResource({ region }) {
 
   // intl
   return (
-    <div className="mb-5 rounded-[10px] border-2 border-crisis bg-bg p-4 sm:p-5">
-      <p className="mb-2 text-[0.8125rem] font-bold uppercase tracking-wider text-crisis">
-        Open right now
-      </p>
-      <h3 className="mb-1 text-[1.25rem] font-bold leading-tight text-text sm:text-[1.375rem]">
+    <div className="mb-5 rounded-[12px] border-2 border-crisis/50 bg-crisis-soft/40 p-5 sm:p-6">
+      <div className="mb-3 flex items-center gap-2">
+        <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-crisis animate-pulse" />
+        <p className="m-0 text-[0.75rem] font-bold uppercase tracking-[0.16em] text-crisis">
+          {tag === "Right now" ? "Open right now" : "Start here"}
+        </p>
+      </div>
+      <h3 className="mb-1 text-[1.375rem] font-bold leading-tight text-text sm:text-[1.5rem]">
         {INTL_PRIMARY.name}
       </h3>
-      <p className="mb-4 text-[1rem] leading-relaxed text-text">
+      <p className="mb-5 text-[1rem] leading-relaxed text-text/85">
         {INTL_PRIMARY.for}
       </p>
       <a
         href={INTL_PRIMARY.href}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[10px] bg-crisis px-5 py-3 text-[1.0625rem] font-bold text-bg transition-colors hover:opacity-90"
+        className="inline-flex min-h-[3.5rem] items-center justify-center gap-2 rounded-[10px] bg-crisis px-6 py-3 text-[1.0625rem] font-bold text-bg shadow-sm transition-all hover:bg-crisis-strong hover:shadow-md focus-visible:outline-2 focus-visible:outline-focus"
       >
-        {INTL_PRIMARY.cta}
+        <span>{INTL_PRIMARY.cta}</span>
+        <span aria-hidden="true" className="text-[1.1em] leading-none">↗</span>
       </a>
-      <p className="mt-3 text-[0.875rem] leading-relaxed text-text-muted">
+      <p className="mt-3 text-[0.875rem] leading-relaxed text-text/70">
         {INTL_PRIMARY.meta}. Many lines offer chat or text.
       </p>
     </div>
@@ -352,10 +447,10 @@ function HelplineList({ region }) {
 
   return (
     <div className="mb-5">
-      <h3 className="mb-3 text-[1.0625rem] font-bold leading-snug text-text">
-        {region === "us" ? "Other US numbers" : "Other international options"}
+      <h3 className="mb-3 text-[0.875rem] font-bold uppercase tracking-[0.12em] text-text-muted">
+        {region === "us" ? "Other ways to reach someone" : "Other international options"}
       </h3>
-      <ul className="m-0 list-none space-y-2 p-0">
+      <ul className="m-0 list-none space-y-2.5 p-0">
         {items
           .filter((h) => h.id !== (region === "us" ? "988" : "findahelpline")) // already shown as primary
           .map((h) => (
@@ -368,12 +463,11 @@ function HelplineList({ region }) {
 
 function HelplineCard({ helpline }) {
   return (
-    <li className="rounded-[10px] border border-border bg-bg/70 p-3 sm:p-4">
+    <li className="rounded-[10px] border border-border/60 bg-bg/60 p-3.5 transition-colors hover:border-border sm:p-4">
       <p className="mb-1 text-[1.0625rem] font-bold leading-snug text-text">
         {helpline.name}
       </p>
       <p className="mb-3 text-[0.95rem] leading-relaxed text-text-muted">
-        <span className="mr-1 text-text-muted">For:</span>
         {helpline.for}
       </p>
       <div className="flex flex-wrap gap-2">
@@ -383,7 +477,7 @@ function HelplineCard({ helpline }) {
             href={a.href}
             target={a.external ? "_blank" : undefined}
             rel={a.external ? "noopener noreferrer" : undefined}
-            className="inline-flex min-h-[2.75rem] items-center rounded-[8px] border-2 border-crisis px-3 py-2 text-[0.95rem] font-bold leading-snug text-crisis transition-colors hover:bg-crisis hover:text-bg"
+            className="inline-flex min-h-[2.75rem] items-center rounded-[8px] border-2 border-crisis/50 bg-transparent px-3.5 py-2 text-[0.95rem] font-bold leading-snug text-crisis transition-colors hover:border-crisis hover:bg-crisis/10"
           >
             {a.label}
           </a>
@@ -410,24 +504,24 @@ function DetailsDisclosure({ region, onSwitchRegion, onCopy, copied }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls="crisis-details"
-        className="flex w-full min-h-[2.75rem] items-center justify-between rounded-[10px] border border-border bg-bg/40 px-4 py-3 text-left text-[0.95rem] font-bold leading-snug text-text transition-colors hover:border-accent"
+        className="flex w-full min-h-[2.75rem] items-center justify-between rounded-[10px] border border-border/60 bg-bg/40 px-4 py-3 text-left text-[0.95rem] font-bold leading-snug text-text transition-colors hover:border-accent/60 hover:bg-bg/60"
       >
         <span>{open ? "Hide details" : "What to expect, copy, and other info"}</span>
-        <span aria-hidden="true" className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`}>
+        <span aria-hidden="true" className={`text-text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}>
           ▾
         </span>
       </button>
 
       {open && (
-        <div id="crisis-details" className="mt-4 space-y-5 rounded-[10px] border border-border bg-bg/50 p-4 sm:p-5">
+        <div id="crisis-details" className="mt-4 space-y-5 rounded-[12px] border border-border/60 bg-bg/40 p-4 sm:p-5">
           <WhatToExpect />
           <CopyBlock onCopy={onCopy} copied={copied} />
-          <div className="rounded-[8px] border border-border bg-bg/60 p-3 text-[0.95rem] leading-relaxed text-text-muted">
+          <div className="rounded-[10px] border border-border/60 bg-bg/60 p-3.5 text-[0.95rem] leading-relaxed text-text-muted">
             Wrong region?{" "}
             <button
               type="button"
               onClick={() => onSwitchRegion(otherRegion)}
-              className="font-bold text-crisis underline hover:opacity-80"
+              className="font-bold text-crisis underline decoration-crisis/40 underline-offset-2 transition-colors hover:decoration-crisis"
             >
               {otherLabel}
             </button>
@@ -444,7 +538,7 @@ function WhatToExpect() {
       <h4 className="mb-2 text-[1rem] font-bold leading-snug text-text">
         What happens when you reach out
       </h4>
-      <ul className="m-0 list-disc space-y-1 pl-5 text-[0.95rem] leading-relaxed text-text-muted">
+      <ul className="m-0 list-disc space-y-1.5 pl-5 text-[0.95rem] leading-relaxed text-text-muted marker:text-text-muted/60">
         <li>A real, trained person answers. They&apos;re used to hard calls.</li>
         <li>You don&apos;t have to explain everything. <em>&ldquo;I&apos;m having a hard time&rdquo;</em> is enough.</li>
         <li>Calls and texts are confidential. Nothing goes to insurance, employers, or family.</li>
@@ -463,9 +557,9 @@ function CopyBlock({ onCopy, copied }) {
       <button
         type="button"
         onClick={onCopy}
-        className="min-h-[2.75rem] rounded-[10px] border-2 border-crisis px-4 py-2 text-[0.95rem] font-bold leading-snug text-crisis hover:bg-crisis hover:text-bg focus-visible:outline-2 focus-visible:outline-focus"
+        className="inline-flex min-h-[2.75rem] items-center rounded-[10px] border-2 border-crisis/50 bg-transparent px-4 py-2 text-[0.95rem] font-bold leading-snug text-crisis transition-colors hover:border-crisis hover:bg-crisis/10"
       >
-        {copied ? "Copied to clipboard" : "Copy all resources"}
+        {copied ? "✓ Copied to clipboard" : "Copy all resources"}
       </button>
       <p className="mt-2 text-[0.875rem] leading-relaxed text-text-muted">
         Paste into a text to yourself or someone you trust.

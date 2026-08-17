@@ -15,10 +15,19 @@
   --color-surface-raised: #212c33;
   --color-text: #f4f7f6;
   --color-text-muted: #b7c4c2;
+
+  /* Calmer accent — sage/teal, used everywhere */
   --color-accent: #6fbfae;
   --color-accent-strong: #4a9484;
-  --color-crisis: #e2574a;
-  --color-crisis-bg: #2a1614;
+
+  /* Crisis palette — warm amber/rose instead of alarming red.
+     Designed to feel "I see you" rather than "WARNING". WCAG AA on bg. */
+  --color-crisis: #f5a07a;        /* warm peach — main crisis text/accent */
+  --color-crisis-strong: #e8825a; /* deeper terracotta for hover/emphasis */
+  --color-crisis-bg: #2a221b;     /* warm dark brown — no red hue */
+  --color-crisis-soft: #3a2e23;   /* slightly raised warm surface inside crisis */
+  --color-crisis-glow: #f5cba7;   /* very soft peach for highlight on dark */
+
   --color-border: #33403f;
   --color-focus: #ffd166;
 

@@ -36,6 +36,7 @@ export default function AppPage() {
         status={state.status}
         error={state.error}
         crisis={state.crisis}
+        crisisSeverity={state.crisisSeverity}
         response={state.response}
         localAIInferring={state.localAIInferring}
         localAIStopped={state.localAIStopped}

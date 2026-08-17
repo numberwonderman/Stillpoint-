@@ -105,9 +105,13 @@ export async function POST(request) {
 
   // If the crisis gate fired, do not call Gemini at all. Surface the
   // canonical crisis response so the client can render local resources
-  // the same way it does for the local-only path.
+  // the same way it does for the local-only path. Forward the severity
+  // tier so the panel can adapt its tone.
   if (parsed.isCrisis) {
-    return NextResponse.json({ isCrisis: true }, { status: 200 });
+    return NextResponse.json(
+      { isCrisis: true, severity: parsed.severity || "elevated" },
+      { status: 200 }
+    );
   }
 
   const summary = {

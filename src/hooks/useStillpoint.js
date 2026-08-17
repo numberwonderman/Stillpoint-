@@ -48,6 +48,9 @@ export function useStillpoint() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [crisis, setCrisis] = useState(false);
+  // Severity of the most recent crisis trigger: "elevated" | "high" |
+  // "imminent". Drives the panel's tone and which resources it surfaces.
+  const [crisisSeverity, setCrisisSeverity] = useState(null);
   const [response, setResponse] = useState("");
   const [localAISupported, setLocalAISupported] = useState(false);
 
@@ -195,6 +198,10 @@ export function useStillpoint() {
       setLocalAIInferring(false);
       setLocalAIStatus("idle");
       setCrisis(true);
+      // Carry the parser's severity through to the panel so it can adapt
+      // its tone and resource ordering. Default to "elevated" if the
+      // server or older client somehow returns a bare crisis signal.
+      setCrisisSeverity(result.severity || "elevated");
       setStatus("");
       setError("");
       setResponse("");
@@ -205,6 +212,7 @@ export function useStillpoint() {
     // crisis event starts fresh.
     setLocalAIStopped(false);
     setCrisis(false);
+    setCrisisSeverity(null);
     setError("");
 
     if (useLocalAIRef.current) {
@@ -225,7 +233,7 @@ export function useStillpoint() {
       return;
     }
 
-    await runCloud(trimmed, setStatus, setError, setResponse, setCrisis);
+    await runCloud(trimmed, setStatus, setError, setResponse, setCrisis, setCrisisSeverity);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTier, localAIInferring]);
 
@@ -234,6 +242,7 @@ export function useStillpoint() {
       status,
       error,
       crisis,
+      crisisSeverity,
       response,
       localAISupported,
       localAIEnabled,
@@ -265,7 +274,7 @@ export function useStillpoint() {
 // body so the hook itself stays scannable.
 // ---------------------------------------------------------------------------
 
-async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis) {
+async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis, setCrisisSeverity) {
   setStatus("Getting a response…");
   setResponse("");
 
@@ -293,6 +302,7 @@ async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis) {
     }
     if (data.isCrisis) {
       setCrisis(true);
+      setCrisisSeverity(data.severity || "elevated");
       setStatus("");
       return;
     }
@@ -336,6 +346,7 @@ async function runLocalAI(
     setLocalAIInferring(false);
     setLocalAIStatus("idle");
     setCrisis(true);
+    setCrisisSeverity(gate.severity || "elevated");
     setStatus("");
     setError("");
     setResponse("");
