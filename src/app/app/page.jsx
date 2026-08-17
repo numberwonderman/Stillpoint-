@@ -4,25 +4,26 @@ import { useState } from "react";
 import { useStillpoint } from "@/hooks/useStillpoint";
 import ChatShell from "../components/ChatShell";
 import Sidebar from "../components/Sidebar";
-import TopBar from "../components/TopBar";
 import MessageList from "../components/MessageList";
 import Composer from "../components/Composer";
 import AuthRequiredModal from "../components/AuthRequiredModal";
+import ModelSelectionModal from "../components/ModelSelectionModal";
 
 /**
- * AppPage — The Stillpoint chat application at /app.
- * Assembles ChatShell layout with Sidebar navigation, central MessageList,
- * TopBar controls, Composer input, and AuthRequiredModal.
+ * AppPage — Main chat workspace.
+ * Clean, distraction-free layout (TopBar removed) with collapsible sidebar,
+ * top-left toggle, centered ModelSelectionModal, central MessageList, and Composer.
  */
 export default function AppPage() {
   const { state, actions } = useStillpoint();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-
-  const activeThread = state.threads.find((t) => t.id === state.activeThreadId);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+  const [modelModalOpen, setModelModalOpen] = useState(false);
 
   return (
     <ChatShell
       sidebarOpen={mobileSidebarOpen}
+      isCollapsed={desktopSidebarCollapsed}
       onCloseSidebar={() => setMobileSidebarOpen(false)}
       sidebar={
         <Sidebar
@@ -30,36 +31,50 @@ export default function AppPage() {
           activeThreadId={state.activeThreadId}
           onSelectThread={actions.selectThread}
           onDeleteThread={actions.deleteThread}
+          onNewThread={actions.newThread}
           user={state.user}
-          localAISupported={state.localAISupported}
           localAIEnabled={state.localAIEnabled}
           selectedTier={state.selectedTier}
-          downloadState={state.downloadState}
-          downloadProgress={state.downloadProgress}
-          downloadText={state.downloadText}
-          localAIStatus={state.localAIStatus}
-          localAIInferring={state.localAIInferring}
-          onEnableLocalAI={actions.enableLocalAI}
-          onDisableLocalAI={actions.disableLocalAI}
-          onSelectTier={actions.setSelectedTier}
-          onStartDownload={actions.startDownload}
-          onCancelDownload={actions.cancelDownload}
           onCloseMobile={() => setMobileSidebarOpen(false)}
+          isCollapsed={desktopSidebarCollapsed}
+          onToggleCollapse={() => setDesktopSidebarCollapsed((prev) => !prev)}
+          onOpenModelModal={() => setModelModalOpen(true)}
         />
       }
     >
-      <TopBar
-        activeThreadTitle={activeThread?.title}
-        onUpdateTitle={(newTitle) => {
-          if (state.activeThreadId) {
-            actions.updateThreadTitle(state.activeThreadId, newTitle);
-          }
-        }}
-        localAIEnabled={state.localAIEnabled}
-        selectedTier={state.selectedTier}
-        onToggleMobileSidebar={() => setMobileSidebarOpen((prev) => !prev)}
-      />
+      {/* Floating Toggle Button for Mobile and Collapsed Desktop */}
+      <div className="absolute top-3 left-3 z-20 flex items-center gap-2">
+        {(mobileSidebarOpen || desktopSidebarCollapsed) && (
+          <button
+            type="button"
+            onClick={() => {
+              if (window.innerWidth < 768) {
+                setMobileSidebarOpen(true);
+              } else {
+                setDesktopSidebarCollapsed(false);
+              }
+            }}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface/90 border border-border/60 text-text-muted hover:text-text hover:bg-surface-raised transition-all backdrop-blur-md shadow-md"
+          >
+            ☰
+          </button>
+        )}
 
+        {/* Mobile menu trigger when sidebar is hidden on small screens */}
+        <button
+          type="button"
+          onClick={() => setMobileSidebarOpen(true)}
+          aria-label="Open sidebar"
+          title="Open menu"
+          className="flex md:hidden h-9 w-9 items-center justify-center rounded-xl bg-surface/90 border border-border/60 text-text-muted hover:text-text hover:bg-surface-raised transition-all backdrop-blur-md shadow-md"
+        >
+          ☰
+        </button>
+      </div>
+
+      {/* Main Chat Scroll View */}
       <MessageList
         messages={state.messages}
         status={state.status}
@@ -69,13 +84,36 @@ export default function AppPage() {
         onChooseCrisisRegion={actions.chooseCrisisRegion}
       />
 
+      {/* Bottom Composer Bar */}
       <Composer
         onSubmit={actions.submit}
         disabled={state.localAIInferring || state.downloadState === "downloading"}
         localAIEnabled={state.localAIEnabled}
         selectedTier={state.selectedTier}
+        onOpenModelModal={() => setModelModalOpen(true)}
       />
 
+      {/* Centered Backdrop-Blurred Model Selection Modal */}
+      <ModelSelectionModal
+        open={modelModalOpen}
+        onClose={() => setModelModalOpen(false)}
+        user={state.user}
+        localAISupported={state.localAISupported}
+        localAIEnabled={state.localAIEnabled}
+        selectedTier={state.selectedTier}
+        downloadState={state.downloadState}
+        downloadProgress={state.downloadProgress}
+        downloadText={state.downloadText}
+        localAIStatus={state.localAIStatus}
+        localAIInferring={state.localAIInferring}
+        onEnableLocalAI={actions.enableLocalAI}
+        onDisableLocalAI={actions.disableLocalAI}
+        onSelectTier={actions.setSelectedTier}
+        onStartDownload={actions.startDownload}
+        onCancelDownload={actions.cancelDownload}
+      />
+
+      {/* Auth Gating Modal */}
       <AuthRequiredModal
         open={state.authRequiredOpen}
         mode={state.authRequiredMode}

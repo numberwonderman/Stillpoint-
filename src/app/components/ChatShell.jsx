@@ -1,37 +1,41 @@
 "use client";
 
 /**
- * ChatShell — top-level application layout.
- * Desktop: persistent sidebar rail + central chat area.
- * Mobile: slide-over sidebar drawer with backdrop overlay.
+ * ChatShell — top-level layout wrapper for the chat application.
+ * Desktop: Dynamic width sidebar (w-72 expanded, w-16 collapsed) with smooth transitions.
+ * Mobile: Slide-over drawer overlay with backdrop blur.
  */
-export default function ChatShell({ sidebar, children, sidebarOpen, onCloseSidebar }) {
+export default function ChatShell({ sidebar, children, sidebarOpen, onCloseSidebar, isCollapsed }) {
   return (
     <div className="flex h-[100dvh] w-full max-w-full overflow-hidden bg-bg text-text">
-      {/* Desktop Sidebar Rail */}
-      <aside className="hidden w-72 shrink-0 flex-col overflow-hidden border-r border-border bg-surface md:flex">
+      {/* Desktop Sidebar Container */}
+      <aside
+        className={`hidden shrink-0 flex-col overflow-hidden border-r border-border/40 bg-surface md:flex transition-all duration-300 ease-in-out ${
+          isCollapsed ? "w-16" : "w-72"
+        }`}
+      >
         {sidebar}
       </aside>
 
-      {/* Mobile Drawer Overlay */}
+      {/* Mobile Slide-Over Drawer */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity"
+            className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity animate-fade-in"
             onClick={onCloseSidebar}
             aria-hidden="true"
           />
 
-          {/* Drawer container */}
-          <aside className="fixed inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col overflow-hidden border-r border-border bg-surface shadow-2xl transition-transform">
+          {/* Mobile Drawer */}
+          <aside className="fixed inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col overflow-hidden border-r border-border/50 bg-surface shadow-2xl transition-transform animate-slide-in">
             {sidebar}
           </aside>
         </div>
       )}
 
-      {/* Main Chat Area */}
-      <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden">
+      {/* Main Content View */}
+      <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-bg">
         {children}
       </div>
     </div>

@@ -141,8 +141,7 @@ export async function POST(request) {
     );
   }
 
-  // 4. Call Gemini. The client is constructed per-request so we never hold
-  //    a long-lived object referencing the key across calls.
+  // 4. Call Gemini via streaming API.
   const ai = new GoogleGenAI({ apiKey });
   const geminiRequest = {
     model: MODEL_NAME,
@@ -154,16 +153,16 @@ export async function POST(request) {
     },
   };
 
-  let response;
+  let responseStream;
   try {
-    response = await ai.models.generateContent(geminiRequest);
+    responseStream = await ai.models.generateContentStream(geminiRequest);
   } catch (err) {
     if (err && err.status === 429) {
       // Free-tier rate limits are tight; one short retry resolves most
       // momentary throttling without the user having to retry manually.
       await sleep(1500);
       try {
-        response = await ai.models.generateContent(geminiRequest);
+        responseStream = await ai.models.generateContentStream(geminiRequest);
       } catch (retryErr) {
         return NextResponse.json(
           { error: mapGeminiError(retryErr) },
@@ -175,21 +174,36 @@ export async function POST(request) {
     }
   }
 
-  let text;
-  try {
-    const candidate = response && response.text;
-    if (typeof candidate !== "string" || !candidate.trim()) {
-      throw new Error("empty");
-    }
-    text = candidate.trim();
-  } catch {
-    return NextResponse.json(
-      { error: "Gemini returned an unexpected response format." },
-      { status: 502 }
-    );
-  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of responseStream) {
+          const textChunk = chunk.text;
+          if (textChunk) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ text: textChunk })}\n\n`)
+            );
+          }
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      } catch (err) {
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ error: mapGeminiError(err) })}\n\n`)
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
 
-  return NextResponse.json({ text }, { status: 200 });
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------

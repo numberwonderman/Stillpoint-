@@ -36,6 +36,10 @@ export default function NavBar() {
     router.refresh();
   }
 
+  if (pathname === "/app" || pathname?.startsWith("/app")) {
+    return null;
+  }
+
   return (
     <nav className="mx-auto flex max-w-[880px] items-center justify-between px-6 py-4">
       <Link href="/" className="flex items-center gap-2 font-bold no-underline">

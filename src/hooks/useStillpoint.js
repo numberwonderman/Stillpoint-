@@ -69,31 +69,10 @@ export function useStillpoint() {
   // Crisis region: "us" | "intl" | null. Persisted in localStorage
   const [crisisRegion, setCrisisRegion] = useState(null);
 
-  // Helper to persist threads to localStorage
+  // Helper to update threads in state
   const persistThreads = (updatedThreads) => {
     setThreads(updatedThreads);
-    try {
-      window.localStorage.setItem("stillpoint:threads", JSON.stringify(updatedThreads));
-    } catch {
-      /* localStorage unavailable */
-    }
   };
-
-  // Rehydrate threads from localStorage on mount
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem("stillpoint:threads");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setThreads(parsed);
-          setActiveThreadId(parsed[0].id);
-        }
-      }
-    } catch {
-      /* localStorage unavailable */
-    }
-  }, []);
 
   // WebGPU availability check
   useEffect(() => {
@@ -154,11 +133,6 @@ export function useStillpoint() {
     (id) => {
       setThreads((prevThreads) => {
         const updated = prevThreads.filter((t) => t.id !== id);
-        try {
-          window.localStorage.setItem("stillpoint:threads", JSON.stringify(updated));
-        } catch {
-          /* best effort */
-        }
         if (activeThreadId === id) {
           setActiveThreadId(updated.length > 0 ? updated[0].id : null);
         }
@@ -170,13 +144,7 @@ export function useStillpoint() {
 
   const updateThreadTitle = useCallback((id, newTitle) => {
     setThreads((prevThreads) => {
-      const updated = prevThreads.map((t) => (t.id === id ? { ...t, title: newTitle } : t));
-      try {
-        window.localStorage.setItem("stillpoint:threads", JSON.stringify(updated));
-      } catch {
-        /* best effort */
-      }
-      return updated;
+      return prevThreads.map((t) => (t.id === id ? { ...t, title: newTitle } : t));
     });
   }, []);
 
@@ -335,7 +303,7 @@ export function useStillpoint() {
       // Helper to update streaming assistant message text & status
       const updateAssistantMsg = (updateFn) => {
         setThreads((prev) => {
-          const nextThreads = prev.map((t) => {
+          return prev.map((t) => {
             if (t.id !== currentThreadId) return t;
             const updatedMessages = t.messages.map((m) => {
               if (m.id !== assistantMsgId) return m;
@@ -343,12 +311,6 @@ export function useStillpoint() {
             });
             return { ...t, messages: updatedMessages };
           });
-          try {
-            window.localStorage.setItem("stillpoint:threads", JSON.stringify(nextThreads));
-          } catch {
-            /* best effort */
-          }
-          return nextThreads;
         });
       };
 
@@ -432,6 +394,70 @@ export function useStillpoint() {
 // Cloud Pipeline Helper
 // ---------------------------------------------------------------------------
 
+class TokenQueue {
+  constructor(onToken, onComplete) {
+    this.buffer = "";
+    this.displayedLength = 0;
+    this.onToken = onToken;
+    this.onComplete = onComplete;
+    this.isDone = false;
+    this.timer = null;
+  }
+
+  append(chunk) {
+    this.buffer += chunk;
+    if (!this.timer) {
+      this.start();
+    }
+  }
+
+  finish() {
+    this.isDone = true;
+    if (!this.timer) {
+      this.start();
+    }
+  }
+
+  start() {
+    const step = () => {
+      if (this.displayedLength < this.buffer.length) {
+        const remaining = this.buffer.slice(this.displayedLength);
+
+        let chunkSize = 1;
+        if (remaining.length > 60) chunkSize = 4;
+        else if (remaining.length > 25) chunkSize = 2;
+        else chunkSize = 1;
+
+        const spaceIdx = remaining.indexOf(" ", 1);
+        if (spaceIdx !== -1 && spaceIdx <= 6 && remaining.length <= 35) {
+          chunkSize = spaceIdx + 1;
+        }
+
+        const nextSlice = remaining.slice(0, chunkSize);
+        this.displayedLength += nextSlice.length;
+        this.onToken(nextSlice);
+
+        const delay = Math.max(12, Math.min(30, Math.floor(250 / Math.max(1, remaining.length))));
+        this.timer = setTimeout(step, delay);
+      } else if (this.isDone) {
+        this.timer = null;
+        if (this.onComplete) this.onComplete();
+      } else {
+        this.timer = null;
+      }
+    };
+
+    step();
+  }
+
+  cancel() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+}
+
 async function runCloudPipeline(
   trimmed,
   setStatus,
@@ -441,7 +467,9 @@ async function runCloudPipeline(
   user,
   updateAssistantMsg
 ) {
-  setStatus("Getting a response…");
+  setStatus("Connecting to Gemini…");
+
+  let tokenQueue = null;
 
   try {
     const res = await fetch("/api/support", {
@@ -449,44 +477,110 @@ async function runCloudPipeline(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: trimmed }),
     });
-    const data = await res.json().catch(() => ({}));
 
     if (res.status === 401) {
       setError("");
       setStatus("");
       setAuthRequiredMode(user ? "expired" : "anonymous");
       setAuthRequiredOpen(true);
-      // Mark assistant message as done/cancelled
       updateAssistantMsg((msg) => ({ ...msg, status: "done", text: "Sign-in required to use Cloud mode." }));
       return;
     }
 
-    if (!res.ok) {
-      const errMsg = data.error || "Something went wrong reaching the cloud. Please try again.";
-      setError(errMsg);
-      setStatus("");
-      updateAssistantMsg((msg) => ({ ...msg, status: "done", text: errMsg }));
-      return;
-    }
+    const contentType = res.headers.get("content-type") || "";
 
-    if (data.isCrisis) {
+    if (!res.ok || contentType.includes("application/json")) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errMsg = data.error || "Something went wrong reaching the cloud. Please try again.";
+        setError(errMsg);
+        setStatus("");
+        updateAssistantMsg((msg) => ({ ...msg, status: "done", text: errMsg }));
+        return;
+      }
+
+      if (data.isCrisis) {
+        updateAssistantMsg((msg) => ({
+          ...msg,
+          status: "done",
+          crisis: true,
+          crisisSeverity: data.severity || "elevated",
+        }));
+        setStatus("");
+        return;
+      }
+
       updateAssistantMsg((msg) => ({
         ...msg,
         status: "done",
-        crisis: true,
-        crisisSeverity: data.severity || "elevated",
+        text: data.text || "",
       }));
       setStatus("");
       return;
     }
 
-    updateAssistantMsg((msg) => ({
-      ...msg,
-      status: "done",
-      text: data.text || "",
-    }));
-    setStatus("");
-  } catch {
+    setStatus("Gemini is typing…");
+
+    tokenQueue = new TokenQueue(
+      (tokenSlice) => {
+        updateAssistantMsg((msg) => ({
+          ...msg,
+          text: (msg.text || "") + tokenSlice,
+        }));
+      },
+      () => {
+        updateAssistantMsg((msg) => ({ ...msg, status: "done" }));
+        setStatus("");
+      }
+    );
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+
+      for (const block of blocks) {
+        const line = block.trim();
+        if (!line.startsWith("data:")) continue;
+
+        const payloadStr = line.slice(5).trim();
+        if (payloadStr === "[DONE]") {
+          tokenQueue.finish();
+          return;
+        }
+
+        try {
+          const parsedData = JSON.parse(payloadStr);
+          if (parsedData.error) {
+            tokenQueue.cancel();
+            setError(parsedData.error);
+            updateAssistantMsg((msg) => ({
+              ...msg,
+              status: "done",
+              text: msg.text || parsedData.error,
+            }));
+            setStatus("");
+            return;
+          }
+          if (parsedData.text) {
+            tokenQueue.append(parsedData.text);
+          }
+        } catch {
+          // ignore malformed frame
+        }
+      }
+    }
+
+    tokenQueue.finish();
+  } catch (err) {
+    if (tokenQueue) tokenQueue.cancel();
     const errMsg = "Network error. Check your connection and try again.";
     setError(errMsg);
     setStatus("");

@@ -57,19 +57,34 @@ export default function MessageBubble({
 
   // Normal / Streaming Assistant bubble
   const isStreaming = status === "streaming";
+  const isEmpty = !text || text.length === 0;
 
   return (
-    <div className="mb-4 flex justify-start w-full">
-      <div className="max-w-[90%] sm:max-w-[85%] rounded-[18px] rounded-tl-[4px] bg-surface border border-border/20 px-5 py-4 text-text shadow-xs break-words overflow-hidden">
-        <p className="m-0 whitespace-pre-wrap leading-relaxed text-[0.95rem] sm:text-[1rem] break-words">
-          {text}
-          {isStreaming && (
-            <span
-              aria-hidden="true"
-              className="ml-1 inline-block h-[1.1em] w-[0.5ch] translate-y-[0.15em] animate-pulse bg-accent"
-            />
-          )}
-        </p>
+    <div className="mb-4 flex justify-start w-full animate-bubble-appear">
+      <div
+        className={`max-w-[90%] sm:max-w-[85%] rounded-[18px] rounded-tl-[4px] bg-surface border px-5 py-4 text-text shadow-xs break-words overflow-hidden transition-all duration-300 ${
+          isStreaming
+            ? "streaming-bubble border-accent/40"
+            : "border-border/20"
+        }`}
+      >
+        {isStreaming && isEmpty ? (
+          <div className="flex items-center gap-3 py-1 text-text-muted">
+            <div className="flex gap-1.5 items-center">
+              <span className="thinking-dot h-2 w-2 rounded-full bg-accent" style={{ animationDelay: "0ms" }} />
+              <span className="thinking-dot h-2 w-2 rounded-full bg-accent" style={{ animationDelay: "200ms" }} />
+              <span className="thinking-dot h-2 w-2 rounded-full bg-accent" style={{ animationDelay: "400ms" }} />
+            </div>
+            <span className="text-xs font-medium tracking-wide opacity-85 animate-pulse">
+              Gemini is writing…
+            </span>
+          </div>
+        ) : (
+          <p className="m-0 whitespace-pre-wrap leading-relaxed text-[0.95rem] sm:text-[1rem] break-words">
+            {text}
+            {isStreaming && <span aria-hidden="true" className="streaming-caret" />}
+          </p>
+        )}
       </div>
     </div>
   );
