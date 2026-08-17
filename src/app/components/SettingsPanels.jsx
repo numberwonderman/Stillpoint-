@@ -42,6 +42,7 @@ export default function SettingsPanels({
   onSelectTier,
   onStartDownload,
   onCancelDownload,
+  embedded = false,
 }) {
   const router = useRouter();
   // The visible "mode" is the source of truth for the UI. We initialize
@@ -73,30 +74,30 @@ export default function SettingsPanels({
   return (
     <section
       aria-labelledby="settings-heading"
-      className="mb-7 rounded-[12px] border border-border bg-surface px-5 py-5 sm:px-6 sm:py-6"
+      className={embedded ? "p-3 space-y-3" : "mb-7 rounded-[12px] border border-border/30 bg-surface px-5 py-5 sm:px-6 sm:py-6"}
     >
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 id="settings-heading" className="m-0 text-[1.125rem] font-bold">
-          <span aria-hidden="true" className="mr-2">⚙️</span>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 id="settings-heading" className="m-0 text-sm font-bold">
+          <span aria-hidden="true" className="mr-1.5">⚙️</span>
           Mode
         </h2>
         {localAIEnabled && (
-          <span className="rounded-full bg-accent/15 px-2.5 py-1 text-[0.75rem] font-bold uppercase tracking-wider text-accent">
+          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[0.7rem] font-semibold text-accent">
             Local AI
           </span>
         )}
         {!localAIEnabled && (
-          <span className="rounded-full bg-border/40 px-2.5 py-1 text-[0.75rem] font-bold uppercase tracking-wider text-text-muted">
+          <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[0.7rem] font-semibold text-text-muted">
             Cloud
           </span>
         )}
       </div>
 
-      {/* Segmented control — the entire UX hinges on this being obvious. */}
+      {/* Segmented control */}
       <div
         role="tablist"
         aria-label="Choose how Stillpoint runs"
-        className="mb-5 grid grid-cols-2 gap-1 rounded-[10px] border border-border bg-bg p-1"
+        className="mb-4 grid grid-cols-2 gap-1 rounded-[10px] border border-border/20 bg-bg/80 p-1"
       >
         <ModeTab
           active={activeMode === "cloud"}

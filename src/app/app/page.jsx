@@ -1,54 +1,81 @@
 "use client";
 
+import { useState } from "react";
 import { useStillpoint } from "@/hooks/useStillpoint";
-import SiteFrame from "../components/SiteFrame";
-import SettingsPanels from "../components/SettingsPanels";
-import InputSection from "../components/InputSection";
-import ResponseSection from "../components/ResponseSection";
+import ChatShell from "../components/ChatShell";
+import Sidebar from "../components/Sidebar";
+import TopBar from "../components/TopBar";
+import MessageList from "../components/MessageList";
+import Composer from "../components/Composer";
 import AuthRequiredModal from "../components/AuthRequiredModal";
 
 /**
- * The Stillpoint tool itself, at /app. Wires the orchestration hook to the
- * four presentational components. No rendering logic of its own — just
- * passes state/actions through.
+ * AppPage — The Stillpoint chat application at /app.
+ * Assembles ChatShell layout with Sidebar navigation, central MessageList,
+ * TopBar controls, Composer input, and AuthRequiredModal.
  */
 export default function AppPage() {
   const { state, actions } = useStillpoint();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const activeThread = state.threads.find((t) => t.id === state.activeThreadId);
 
   return (
-    <SiteFrame>
-      <SettingsPanels
-        user={state.user}
-        localAISupported={state.localAISupported}
+    <ChatShell
+      sidebarOpen={mobileSidebarOpen}
+      onCloseSidebar={() => setMobileSidebarOpen(false)}
+      sidebar={
+        <Sidebar
+          threads={state.threads}
+          activeThreadId={state.activeThreadId}
+          onSelectThread={actions.selectThread}
+          onDeleteThread={actions.deleteThread}
+          user={state.user}
+          localAISupported={state.localAISupported}
+          localAIEnabled={state.localAIEnabled}
+          selectedTier={state.selectedTier}
+          downloadState={state.downloadState}
+          downloadProgress={state.downloadProgress}
+          downloadText={state.downloadText}
+          localAIStatus={state.localAIStatus}
+          localAIInferring={state.localAIInferring}
+          onEnableLocalAI={actions.enableLocalAI}
+          onDisableLocalAI={actions.disableLocalAI}
+          onSelectTier={actions.setSelectedTier}
+          onStartDownload={actions.startDownload}
+          onCancelDownload={actions.cancelDownload}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
+        />
+      }
+    >
+      <TopBar
+        activeThreadTitle={activeThread?.title}
+        onUpdateTitle={(newTitle) => {
+          if (state.activeThreadId) {
+            actions.updateThreadTitle(state.activeThreadId, newTitle);
+          }
+        }}
         localAIEnabled={state.localAIEnabled}
         selectedTier={state.selectedTier}
-        downloadState={state.downloadState}
-        downloadProgress={state.downloadProgress}
-        downloadText={state.downloadText}
-        localAIStatus={state.localAIStatus}
-        localAIInferring={state.localAIInferring}
-        onEnableLocalAI={actions.enableLocalAI}
-        onDisableLocalAI={actions.disableLocalAI}
-        onSelectTier={actions.setSelectedTier}
-        onStartDownload={actions.startDownload}
-        onCancelDownload={actions.cancelDownload}
+        onToggleMobileSidebar={() => setMobileSidebarOpen((prev) => !prev)}
       />
-      <InputSection onSubmit={actions.submit} />
-      <ResponseSection
+
+      <MessageList
+        messages={state.messages}
         status={state.status}
         error={state.error}
-        crisis={state.crisis}
-        crisisSeverity={state.crisisSeverity}
-        response={state.response}
         localAIInferring={state.localAIInferring}
-        localAIStopped={state.localAIStopped}
         crisisRegion={state.crisisRegion}
         onChooseCrisisRegion={actions.chooseCrisisRegion}
       />
-      {/* Shown the moment the cloud path returns 401. The modal owns
-          its own focus trap, esc handler, and click-through to the
-          settings panel — the page just renders it and passes the
-          callbacks the hook exposes. */}
+
+      <Composer
+        onSubmit={actions.submit}
+        disabled={state.localAIInferring || state.downloadState === "downloading"}
+        localAIEnabled={state.localAIEnabled}
+        selectedTier={state.selectedTier}
+      />
+
       <AuthRequiredModal
         open={state.authRequiredOpen}
         mode={state.authRequiredMode}
@@ -57,6 +84,6 @@ export default function AppPage() {
         onEnableLocalAI={actions.enableLocalAI}
         onClose={actions.closeAuthRequired}
       />
-    </SiteFrame>
+    </ChatShell>
   );
 }

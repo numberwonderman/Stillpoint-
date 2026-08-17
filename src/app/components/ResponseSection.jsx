@@ -227,7 +227,7 @@ const SEVERITY_COPY = {
   },
 };
 
-function CrisisPanel({ severity, localAIStopped, region, onChooseRegion }) {
+export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion }) {
   const [copied, setCopied] = useState(false);
   // Default to "elevated" if the server didn't pass severity (older
   // clients, partial responses). The panel still works — it just
