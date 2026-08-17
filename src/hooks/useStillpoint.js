@@ -54,6 +54,20 @@ export function useStillpoint() {
   const [response, setResponse] = useState("");
   const [localAISupported, setLocalAISupported] = useState(false);
 
+  // Auth state — fetched once on mount. null = signed out, { email } =
+  // signed in. The auth-required modal uses this to decide its headline.
+  const [user, setUser] = useState(undefined); // undefined = loading
+  // Becomes true the moment the cloud path returns 401, so the
+  // AuthRequiredModal can appear with a clear, two-button choice.
+  const [authRequiredOpen, setAuthRequiredOpen] = useState(false);
+  // "anonymous" — user never signed in this session, the cloud path
+  //   just rejected the request because there's no account.
+  // "expired"   — we *were* signed in earlier (user !== null at the
+  //   moment of the 401) and the cookie / token has now gone stale.
+  // The modal swaps its headline + body between the two so the
+  // language never says "session expired" to someone who never had one.
+  const [authRequiredMode, setAuthRequiredMode] = useState("anonymous");
+
   // Local AI mode state (separate from the "ready" flag on the module —
   // this drives the settings-panel UI).
   const [localAIEnabled, setLocalAIEnabled] = useState(false);
@@ -81,6 +95,24 @@ export function useStillpoint() {
   // lifetime of the page, so it's safe to compute once on mount.
   useEffect(() => {
     setLocalAISupported(isLocalAISupported());
+  }, []);
+
+  // Fetch the current user once on mount. If they came back from a
+  // /login or /signup redirect, this picks up the new session. The
+  // auth-required modal reads `user` to choose its copy.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setUser(data.user || null);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Restore persisted crisis-region preference (so the user doesn't have
@@ -233,7 +265,7 @@ export function useStillpoint() {
       return;
     }
 
-    await runCloud(trimmed, setStatus, setError, setResponse, setCrisis, setCrisisSeverity);
+    await runCloud(trimmed, setStatus, setError, setResponse, setCrisis, setCrisisSeverity, setAuthRequiredOpen, setAuthRequiredMode, user);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTier, localAIInferring]);
 
@@ -256,6 +288,9 @@ export function useStillpoint() {
       localAIInferring,
       localAIStopped,
       crisisRegion,
+      user,
+      authRequiredOpen,
+      authRequiredMode,
     },
     actions: {
       submit,
@@ -265,6 +300,13 @@ export function useStillpoint() {
       startDownload,
       cancelDownload,
       chooseCrisisRegion,
+      closeAuthRequired: () => {
+        setAuthRequiredOpen(false);
+        // Reset the mode so the next 401 re-derives it from `user`
+        // rather than reusing the previous one. Cheap and keeps the
+        // state machine predictable.
+        setAuthRequiredMode("anonymous");
+      },
     },
   };
 }
@@ -274,7 +316,7 @@ export function useStillpoint() {
 // body so the hook itself stays scannable.
 // ---------------------------------------------------------------------------
 
-async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis, setCrisisSeverity) {
+async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis, setCrisisSeverity, setAuthRequiredOpen, setAuthRequiredMode, user) {
   setStatus("Getting a response…");
   setResponse("");
 
@@ -291,8 +333,16 @@ async function runCloud(trimmed, setStatus, setError, setResponse, setCrisis, se
     const data = await res.json().catch(() => ({}));
 
     if (res.status === 401) {
-      setError("Your session has expired. Please sign in again.");
+      // Don't dump a generic "session expired" string — open the
+      // AuthRequiredModal so the user can either sign in or switch
+      // to Local AI in one click. The modal's headline reflects whether
+      // they were previously signed in (expired) or never signed in
+      // (anonymous). `user` is captured at the moment of the 401 so a
+      // race between /api/auth/me and /api/support can't flip the tone.
+      setError("");
       setStatus("");
+      setAuthRequiredMode(user ? "expired" : "anonymous");
+      setAuthRequiredOpen(true);
       return;
     }
     if (!res.ok) {

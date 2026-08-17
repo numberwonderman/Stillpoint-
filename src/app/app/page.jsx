@@ -5,6 +5,7 @@ import SiteFrame from "../components/SiteFrame";
 import SettingsPanels from "../components/SettingsPanels";
 import InputSection from "../components/InputSection";
 import ResponseSection from "../components/ResponseSection";
+import AuthRequiredModal from "../components/AuthRequiredModal";
 
 /**
  * The Stillpoint tool itself, at /app. Wires the orchestration hook to the
@@ -17,6 +18,7 @@ export default function AppPage() {
   return (
     <SiteFrame>
       <SettingsPanels
+        user={state.user}
         localAISupported={state.localAISupported}
         localAIEnabled={state.localAIEnabled}
         selectedTier={state.selectedTier}
@@ -42,6 +44,18 @@ export default function AppPage() {
         localAIStopped={state.localAIStopped}
         crisisRegion={state.crisisRegion}
         onChooseCrisisRegion={actions.chooseCrisisRegion}
+      />
+      {/* Shown the moment the cloud path returns 401. The modal owns
+          its own focus trap, esc handler, and click-through to the
+          settings panel — the page just renders it and passes the
+          callbacks the hook exposes. */}
+      <AuthRequiredModal
+        open={state.authRequiredOpen}
+        mode={state.authRequiredMode}
+        localAISupported={state.localAISupported}
+        localAIReady={state.localAIReady}
+        onEnableLocalAI={actions.enableLocalAI}
+        onClose={actions.closeAuthRequired}
       />
     </SiteFrame>
   );
