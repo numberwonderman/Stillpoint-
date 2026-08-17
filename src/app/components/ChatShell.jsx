@@ -22,13 +22,13 @@ export default function ChatShell({ sidebar, children, sidebarOpen, onCloseSideb
         <div className="fixed inset-0 z-50 md:hidden">
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs transition-opacity animate-fade-in"
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity animate-backdrop-fade"
             onClick={onCloseSidebar}
             aria-hidden="true"
           />
 
           {/* Mobile Drawer */}
-          <aside className="fixed inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col overflow-hidden border-r border-border/50 bg-surface shadow-2xl transition-transform animate-slide-in">
+          <aside className="fixed inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col overflow-hidden border-r border-border/50 bg-surface shadow-2xl transition-transform animate-drawer-slide">
             {sidebar}
           </aside>
         </div>

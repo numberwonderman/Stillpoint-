@@ -106,7 +106,7 @@ export default function ModelSelectionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
       {/* Backdrop with blur */}
       <div
-        className="fixed inset-0 bg-black/75 backdrop-blur-md transition-opacity animate-fade-in"
+        className="fixed inset-0 bg-black/75 backdrop-blur-md transition-opacity animate-backdrop-fade"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -116,7 +116,7 @@ export default function ModelSelectionModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="model-modal-title"
-        className="relative z-10 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border/80 bg-surface/95 p-6 sm:p-8 shadow-2xl backdrop-blur-xl text-text transition-all"
+        className="relative z-10 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-border/80 bg-surface/95 p-6 sm:p-8 shadow-2xl backdrop-blur-xl text-text transition-all animate-modal-pop"
       >
         {/* Close Button */}
         <button
