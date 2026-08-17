@@ -8,7 +8,9 @@ import { useState, useRef, useEffect } from "react";
  */
 export default function Composer({
   onSubmit,
-  disabled,
+  disabled = false,
+  isGenerating = false,
+  isDownloading = false,
   localAIEnabled,
   selectedTier,
   onOpenModelModal,
@@ -24,9 +26,11 @@ export default function Composer({
     }
   }, [text]);
 
+  const isSendDisabled = !text.trim() || disabled || isGenerating || isDownloading;
+
   function handleSend(e) {
     if (e) e.preventDefault();
-    if (!text.trim() || disabled) return;
+    if (isSendDisabled) return;
     onSubmit(text);
     setText("");
     if (textareaRef.current) {
@@ -37,10 +41,14 @@ export default function Composer({
   function handleKeyDown(e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (!isSendDisabled) {
+        handleSend();
+      }
     } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      handleSend();
+      if (!isSendDisabled) {
+        handleSend();
+      }
     }
   }
 
@@ -58,7 +66,11 @@ export default function Composer({
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={disabled}
-            placeholder="Type how you're feeling…"
+            placeholder={
+              isGenerating
+                ? "Type your next message while Stillpoint responds…"
+                : "Type how you're feeling…"
+            }
             aria-label="Describe how you're feeling"
             className="w-full max-w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-[0.95rem] text-text placeholder:text-text-muted/50 focus:outline-none disabled:opacity-50 break-words"
           />
@@ -79,14 +91,26 @@ export default function Composer({
             </button>
 
             <div className="flex items-center gap-2">
-              <span className="hidden sm:inline text-xs text-text-muted/60">Press Enter ↵</span>
+              {isGenerating && text.trim() ? (
+                <span className="hidden sm:inline text-xs text-accent font-medium animate-pulse">
+                  Waiting for response…
+                </span>
+              ) : (
+                <span className="hidden sm:inline text-xs text-text-muted/60">Press Enter ↵</span>
+              )}
               <button
                 type="submit"
-                disabled={!text.trim() || disabled}
+                disabled={isSendDisabled}
                 className="flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] bg-accent px-3.5 py-1 text-xs font-semibold text-bg transition-all hover:bg-accent-strong hover:text-text disabled:cursor-not-allowed disabled:opacity-30 shadow-sm"
               >
-                <span>Send</span>
-                <span aria-hidden="true" className="text-xs">➔</span>
+                {isGenerating ? (
+                  <span>Generating…</span>
+                ) : (
+                  <>
+                    <span>Send</span>
+                    <span aria-hidden="true" className="text-xs">➔</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

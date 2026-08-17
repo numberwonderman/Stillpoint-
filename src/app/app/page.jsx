@@ -87,7 +87,8 @@ export default function AppPage() {
       {/* Bottom Composer Bar */}
       <Composer
         onSubmit={actions.submit}
-        disabled={state.localAIInferring || state.downloadState === "downloading"}
+        isGenerating={state.isGenerating || state.localAIInferring}
+        isDownloading={state.downloadState === "downloading"}
         localAIEnabled={state.localAIEnabled}
         selectedTier={state.selectedTier}
         onOpenModelModal={() => setModelModalOpen(true)}

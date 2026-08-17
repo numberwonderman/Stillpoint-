@@ -216,8 +216,14 @@ export function useStillpoint() {
   const derivedCrisisSeverity = lastAssistantMsg?.crisisSeverity || null;
   const derivedLocalAIStopped = !!(lastAssistantMsg?.localAIStopped);
 
+  const isGenerating =
+    localAIInferring ||
+    messages.some((m) => m.role === "assistant" && m.status === "streaming") ||
+    (status !== "" && !error && !status.includes("Downloading") && !status.includes("Loading"));
+
   const submit = useCallback(
     async (rawText) => {
+      if (isGenerating) return;
       const trimmed = (rawText || "").trim();
       if (!trimmed) {
         setError("Please enter how you're feeling before submitting.");
@@ -340,7 +346,7 @@ export function useStillpoint() {
         updateAssistantMsg
       );
     },
-    [activeThreadId, threads, selectedTier, localAIInferring, user]
+    [activeThreadId, threads, selectedTier, localAIInferring, isGenerating, user]
   );
 
   return {
@@ -360,6 +366,7 @@ export function useStillpoint() {
       downloadText,
       localAIStatus,
       localAIInferring,
+      isGenerating,
       localAIStopped: derivedLocalAIStopped,
       crisisRegion,
       user,
