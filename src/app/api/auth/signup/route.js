@@ -3,12 +3,22 @@ import bcrypt from "bcryptjs";
 import { connectToDatabase } from "@/lib/mongodb";
 import User from "@/models/User";
 import { signAuthToken, sessionCookieOptions } from "@/lib/auth";
+import {
+  authRateLimit,
+  getRateLimitIdentifier,
+  rateLimitResponse,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request) {
+  // Rate-limit before bcrypt and the Mongo round-trip.
+  const limit = await authRateLimit.limit(getRateLimitIdentifier(request));
+  const limited = rateLimitResponse(limit);
+  if (limited) return limited;
+
   let body;
   try {
     body = await request.json();

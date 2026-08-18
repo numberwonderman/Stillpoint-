@@ -29,6 +29,11 @@ import {
   EMOTION_BUCKETS,
   INTENSITY_MODIFIERS,
 } from "@/lib/lexicon";
+import {
+  aiRateLimit,
+  getRateLimitIdentifier,
+  rateLimitResponse,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -71,6 +76,15 @@ export async function POST(request) {
       { status: 401 }
     );
   }
+
+  // 1b. Rate-limit after auth, before any Gemini work. The auth gate
+  //     already keeps anonymous traffic off this route; this limit
+  //     protects our Gemini budget from a single authenticated client
+  //     running up the bill. Per-IP because the session cookie is the
+  //     real identity and cookies are per-browser anyway.
+  const limit = await aiRateLimit.limit(getRateLimitIdentifier(request));
+  const limited = rateLimitResponse(limit);
+  if (limited) return limited;
 
   // 2. Parse the JSON body, which is the user's raw text input. We run
   //    parser.js on this server to convert it into a minimal structured

@@ -3,10 +3,21 @@ import bcrypt from "bcryptjs";
 import { connectToDatabase } from "@/lib/mongodb";
 import User from "@/models/User";
 import { signAuthToken, sessionCookieOptions } from "@/lib/auth";
+import {
+  authRateLimit,
+  getRateLimitIdentifier,
+  rateLimitResponse,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
 export async function POST(request) {
+  // Rate-limit before bcrypt/Mongo: the whole point is to keep abuse
+  // off the expensive paths. Redis is the cheap guard.
+  const limit = await authRateLimit.limit(getRateLimitIdentifier(request));
+  const limited = rateLimitResponse(limit);
+  if (limited) return limited;
+
   let body;
   try {
     body = await request.json();
