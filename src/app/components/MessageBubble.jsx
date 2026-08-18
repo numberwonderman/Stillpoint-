@@ -5,16 +5,7 @@ import SpeechPlayer from "./SpeechPlayer";
 import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { useMemo } from "react";
 
-/**
- * MessageBubble — renders a single chat message.
- * User messages: right-aligned, sleek user-bubble.
- * Assistant messages: left-aligned, surface tinted.
- * Crisis assistant messages: renders CrisisPanel inline.
- *
- * For assistant bubbles, MessageBubble owns the text rendering so that
- * TTS word-highlighting can be applied to the same <p> the user reads —
- * avoiding a duplicated "echo" of the message under the controls.
- */
+
 export default function MessageBubble({
   message,
   crisisRegion,
@@ -109,7 +100,7 @@ export default function MessageBubble({
   return (
     <div className="mb-4 flex justify-start w-full animate-bubble-appear">
       <div
-        className={`max-w-[90%] sm:max-w-[85%] rounded-[18px] rounded-tl-[4px] bg-surface border px-5 py-4 text-text shadow-xs break-words overflow-hidden transition-all duration-300 ${
+        className={`max-w-[90%] sm:max-w-[85%] rounded-[18px] rounded-tl-[4px] bg-surface border px-5 py-4 text-text shadow-xs break-words transition-all duration-300 ${
           isStreaming
             ? "streaming-bubble border-accent/40"
             : "border-border/20"

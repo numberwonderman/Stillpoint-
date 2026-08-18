@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useSpeechSynthesis({
   lang = "en-US",
-  rate: initialRate = 1.15,
+  rate: initialRate = 1.05,
   pitch: initialPitch = 1,
   volume: initialVolume = 1,
   voiceURI: initialVoiceURI,
@@ -23,9 +23,9 @@ export function useSpeechSynthesis({
   const [volume, setVolume] = useState(initialVolume);
   const [voiceURI, setVoiceURI] = useState(initialVoiceURI);
 
-  const queueRef = useRef([]); // remaining utterances to speak
-  const currentIndexRef = useRef(0);
-  const cancelledRef = useRef(false);
+  const activeUtteranceRef = useRef(null);
+  const fullTextRef = useRef("");
+  const fallbackTimerRef = useRef(null);
 
   // detect support + populate voices
   useEffect(() => {
@@ -45,6 +45,7 @@ export function useSpeechSynthesis({
       try {
         window.speechSynthesis.cancel();
       } catch (_) {}
+      if (fallbackTimerRef.current) clearInterval(fallbackTimerRef.current);
     };
   }, []);
 
@@ -63,106 +64,127 @@ export function useSpeechSynthesis({
     return byLangPrefix || voices[0] || null;
   }, [voices, voiceURI, lang]);
 
-  const tokenize = useCallback((text) => {
-    // split into word + separator tokens, preserving order
-    // regex: contiguous letters/digits/apostrophes = word; everything else = separator
+  const tokenizeWithRanges = useCallback((text) => {
     const re = /([A-Za-z0-9'\-]+)|([^A-Za-z0-9'\-]+)/g;
-    const out = [];
+    const tokens = [];
+    let wordCount = 0;
     let m;
-    while ((m = re.exec(text)) !== null) {
-      out.push({ type: m[1] ? "word" : "sep", text: m[0] });
+    while ((m = re.exec(text || "")) !== null) {
+      const startChar = m.index;
+      const endChar = m.index + m[0].length;
+      const isWord = Boolean(m[1]);
+      tokens.push({
+        type: isWord ? "word" : "sep",
+        text: m[0],
+        startChar,
+        endChar,
+        wordIndex: isWord ? wordCount : -1,
+      });
+      if (isWord) wordCount++;
     }
-    return out;
+    return tokens;
   }, []);
 
-  // Words to feed to the speech engine: same positions as `tokenize`'s
-  // word tokens, but with trailing/leading punctuation stripped so the
-  // synth doesn't read "comma", "period", etc. The visual highlight in
-  // MessageBubble still uses the raw tokens so the on-screen word keeps
-  // its original punctuation.
-
-  const speakUtterance = useCallback(
-    (text) =>
-      new Promise((resolve) => {
-        if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-          resolve();
-          return;
-        }
-        const u = new SpeechSynthesisUtterance(text);
-        const v = pickVoice();
-        if (v) u.voice = v;
-        u.lang = v?.lang || lang;
-        u.rate = rate;
-        u.pitch = pitch;
-        u.volume = volume;
-        u.onend = () => resolve();
-        u.onerror = () => resolve();
-        try {
-          window.speechSynthesis.speak(u);
-        } catch (_) {
-          resolve();
-        }
-      }),
-    [pickVoice, lang, rate, pitch, volume]
-  );
-
-  const drainQueue = useCallback(async () => {
-    cancelledRef.current = false;
-    while (queueRef.current.length > 0 && !cancelledRef.current) {
-      // honor pause: speechSynthesis.pause() suspends the currently
-      // playing utterance; we wait for resume() before continuing.
-      if (typeof window !== "undefined" && window.speechSynthesis?.paused) {
-        await new Promise((r) => setTimeout(r, 80));
-        continue;
-      }
-      const next = queueRef.current.shift();
-      const idx = currentIndexRef.current++;
-      setWordIndex(idx);
-      await speakUtterance(next);
+  const clearTimers = useCallback(() => {
+    if (fallbackTimerRef.current) {
+      clearInterval(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
     }
-    if (!cancelledRef.current) {
-      setWordIndex(-1);
-      setSpeaking(false);
-      setPaused(false);
-    }
-  }, [speakUtterance]);
+  }, []);
 
   const speak = useCallback(
-    (text, opts = {}) => {
-      if (!supported) return;
+    (text) => {
+      if (!supported || !text) return;
+
+      clearTimers();
       try {
         window.speechSynthesis.cancel();
       } catch (_) {}
 
-      const tokens = tokenize(text);
-      const wordPositions = [];
-      tokens.forEach((t, i) => {
-        if (t.type === "word") wordPositions.push(i);
-      });
+      fullTextRef.current = text;
+      const tokensWithRanges = tokenizeWithRanges(text);
+      setWordTokens(tokensWithRanges);
 
-      const startWordIdx = Math.max(0, opts.fromIndex || 0);
-      const sliceStart =
-        startWordIdx > 0 && wordPositions[startWordIdx - 1] !== undefined
-          ? wordPositions[startWordIdx - 1] + 1
-          : 0;
-      const slice = tokens.slice(sliceStart);
+      const wordTokensList = tokensWithRanges.filter((t) => t.type === "word");
+      if (wordTokensList.length === 0) return;
 
-      // Visual tokens keep their punctuation; the spoken version strips it.
-      const spokenSlice = slice.map((t) =>
-        t.type === "word"
-          ? { ...t, text: t.text.replace(/^[^\w']+|[^\w']+$/g, "") }
-          : t
-      );
+      const u = new SpeechSynthesisUtterance(text);
+      const v = pickVoice();
+      if (v) u.voice = v;
+      u.lang = v?.lang || lang;
+      u.rate = rate;
+      u.pitch = pitch;
+      u.volume = volume;
 
-      setWordTokens(slice);
-      queueRef.current = spokenSlice.map((t) => t.text).filter((w) => w.length > 0);
-      currentIndexRef.current = 0;
-      cancelledRef.current = false;
+      let lastMatchedIndex = 0;
+      setWordIndex(0);
+
+      // Real-time boundary event listener
+      u.onboundary = (event) => {
+        if (typeof event.charIndex === "number") {
+          const charIdx = event.charIndex;
+          // Find token matching charIdx
+          const matchedToken = tokensWithRanges.find(
+            (t) => t.type === "word" && charIdx >= t.startChar && charIdx < t.endChar + 3
+          );
+          if (matchedToken && matchedToken.wordIndex >= 0) {
+            lastMatchedIndex = matchedToken.wordIndex;
+            setWordIndex(matchedToken.wordIndex);
+          }
+        }
+      };
+
+      u.onend = () => {
+        clearTimers();
+        setWordIndex(-1);
+        setSpeaking(false);
+        setPaused(false);
+        activeUtteranceRef.current = null;
+      };
+
+      u.onerror = () => {
+        clearTimers();
+        setWordIndex(-1);
+        setSpeaking(false);
+        setPaused(false);
+        activeUtteranceRef.current = null;
+      };
+
+      activeUtteranceRef.current = u;
       setSpeaking(true);
       setPaused(false);
-      drainQueue();
+
+      try {
+        window.speechSynthesis.speak(u);
+      } catch (_) {
+        setSpeaking(false);
+        setPaused(false);
+        setWordIndex(-1);
+        return;
+      }
+
+      // Fallback timer: if browser speech synth onboundary isn't supported for selected voice,
+      // progress highlight smoothly based on text length & speech rate.
+      const totalWords = wordTokensList.length;
+      const startTime = Date.now();
+      // Estimated total speech duration in ms based on character count and speed rate
+      const totalChars = text.length;
+      const estDurationMs = Math.max(800, (totalChars / 14) * (1000 / rate));
+
+      fallbackTimerRef.current = setInterval(() => {
+        if (window.speechSynthesis.paused) return;
+        const elapsed = Date.now() - startTime;
+        const fraction = Math.min(1, elapsed / estDurationMs);
+        const estWordIdx = Math.floor(fraction * totalWords);
+
+        // Advance wordIndex smoothly if boundary events haven't caught up
+        if (estWordIdx > lastMatchedIndex && estWordIdx < totalWords) {
+          lastMatchedIndex = estWordIdx;
+          setWordIndex(estWordIdx);
+        }
+      }, 100);
     },
-    [supported, tokenize, drainQueue]
+    [supported, lang, rate, pitch, volume, pickVoice, tokenizeWithRanges, clearTimers]
   );
 
   const pause = useCallback(() => {
@@ -181,27 +203,18 @@ export function useSpeechSynthesis({
       window.speechSynthesis.resume();
     } catch (_) {}
     setPaused(false);
-    // if the engine finished while paused, restart from the current word
-    if (queueRef.current.length === 0) {
-      // continue from current word index
-      const currentWord = wordIndex >= 0 ? wordIndex : 0;
-      const remainingText = wordTokens
-        .map((t, i) => (i >= currentWord ? t.text : ""))
-        .join("");
-      speak(remainingText, { fromIndex: 0 });
-    }
-  }, [speaking, paused, wordIndex, wordTokens, speak]);
+  }, [speaking, paused]);
 
   const cancel = useCallback(() => {
-    cancelledRef.current = true;
+    clearTimers();
     try {
       window.speechSynthesis.cancel();
     } catch (_) {}
-    queueRef.current = [];
+    activeUtteranceRef.current = null;
     setSpeaking(false);
     setPaused(false);
     setWordIndex(-1);
-  }, []);
+  }, [clearTimers]);
 
   return {
     supported,
@@ -224,3 +237,4 @@ export function useSpeechSynthesis({
     cancel,
   };
 }
+

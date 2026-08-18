@@ -2,23 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 
-/**
- * SpeechPlayer — render-only TTS controls (Listen / Pause / Resume / Stop)
- * for an assistant message. The actual synthesis + word-index state lives
- * in the parent (MessageBubble), which also uses that index to highlight
- * the active word in the rendered message text.
- *
- * Props (the synthesized state is passed in so a single hook instance is
- * shared with the message renderer):
- *   text       — the message text to speak
- *   lang       — BCP-47 language tag
- *   supported  — whether the browser exposes speechSynthesis
- *   speaking   — currently narrating
- *   voices     — available SpeechSynthesisVoice list
- *   rate / pitch / voiceURI — current voice settings
- *   onChangeRate / onChangePitch / onChangeVoice — setters
- *   speak / pause / resume / cancel — controls from useSpeechSynthesis
- */
 export default function SpeechPlayer({
   text,
   supported,
@@ -37,7 +20,21 @@ export default function SpeechPlayer({
   cancel,
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [popoverPlacement, setPopoverPlacement] = useState("up"); // "up" | "down"
   const settingsRef = useRef(null);
+
+  function handleToggleSettings() {
+    if (!settingsOpen && settingsRef.current) {
+      const rect = settingsRef.current.getBoundingClientRect();
+      // If button is near top of viewport (< 280px), pop down; otherwise pop up
+      if (rect.top < 280) {
+        setPopoverPlacement("down");
+      } else {
+        setPopoverPlacement("up");
+      }
+    }
+    setSettingsOpen((prev) => !prev);
+  }
 
   // Close the settings popover on outside click / Escape.
   useEffect(() => {
@@ -132,7 +129,7 @@ export default function SpeechPlayer({
           <div className="relative" ref={settingsRef}>
             <button
               type="button"
-              onClick={() => setSettingsOpen((o) => !o)}
+              onClick={handleToggleSettings}
               aria-label="Voice settings"
               aria-expanded={settingsOpen}
               title="Voice settings"
@@ -152,30 +149,37 @@ export default function SpeechPlayer({
               <div
                 role="dialog"
                 aria-label="Voice settings"
-                className="absolute bottom-full right-0 mb-2 w-[min(15rem,calc(100vw-2rem))] max-h-[min(70vh,24rem)] overflow-y-auto rounded-lg border border-border/40 bg-bg/95 p-2.5 shadow-xl backdrop-blur-md z-50"
+                className={`absolute right-0 w-[min(16rem,calc(100vw-2.5rem))] max-h-[min(80vh,22rem)] overflow-y-auto rounded-xl border border-border/60 bg-surface/98 p-3 shadow-2xl backdrop-blur-xl z-50 animate-modal-pop ${
+                  popoverPlacement === "down" ? "top-full mt-2" : "bottom-full mb-2"
+                }`}
               >
-                <div className="mb-2.5">
+                <div className="mb-3">
                   <div className="mb-1 flex items-center justify-between">
                     <label htmlFor="tts-rate" className="text-[0.72rem] font-semibold text-text-muted">
-                      Speed
+                      Speed (Rate)
                     </label>
-                    <span className="text-[0.7rem] font-mono text-text-muted/80">
+                    <span className="text-[0.7rem] font-mono font-bold text-accent">
                       {rate.toFixed(2)}×
                     </span>
                   </div>
                   <input
                     id="tts-rate"
                     type="range"
-                    min="0.5"
-                    max="2"
+                    min="0.75"
+                    max="2.5"
                     step="0.05"
                     value={rate}
                     onChange={(e) => onChangeRate?.(parseFloat(e.target.value))}
-                    className="w-full accent-accent"
+                    className="w-full accent-accent cursor-pointer"
                   />
+                  <div className="flex justify-between text-[0.65rem] text-text-muted/60 mt-0.5 font-mono">
+                    <span>0.75×</span>
+                    <span>1.05×</span>
+                    <span>2.5×</span>
+                  </div>
                 </div>
 
-                <div className="mb-2.5">
+                <div className="mb-3">
                   <div className="mb-1 flex items-center justify-between">
                     <label htmlFor="tts-pitch" className="text-[0.72rem] font-semibold text-text-muted">
                       Pitch
@@ -187,12 +191,12 @@ export default function SpeechPlayer({
                   <input
                     id="tts-pitch"
                     type="range"
-                    min="0"
-                    max="2"
+                    min="0.5"
+                    max="1.75"
                     step="0.05"
                     value={pitch}
                     onChange={(e) => onChangePitch?.(parseFloat(e.target.value))}
-                    className="w-full accent-accent"
+                    className="w-full accent-accent cursor-pointer"
                   />
                 </div>
 
@@ -204,7 +208,7 @@ export default function SpeechPlayer({
                     id="tts-voice"
                     value={voiceURI || ""}
                     onChange={(e) => onChangeVoice?.(e.target.value || undefined)}
-                    className="w-full rounded-md border border-border/40 bg-surface-raised/60 px-2 py-1 text-xs text-text focus:outline-none focus:border-accent/60"
+                    className="w-full rounded-lg border border-border/60 bg-bg/80 px-2 py-1.5 text-xs text-text focus:outline-none focus:border-accent/60"
                   >
                     <option value="">System default</option>
                     {(voices || []).map((v) => (
@@ -216,7 +220,7 @@ export default function SpeechPlayer({
                 </div>
 
                 {speaking && (
-                  <p className="mt-2 text-[0.68rem] leading-snug text-text-muted/70">
+                  <p className="mt-2 text-[0.68rem] leading-snug text-text-muted/70 italic">
                     Changes apply next listen.
                   </p>
                 )}
