@@ -28,12 +28,16 @@ export default function ModelSelectionModal({
   onSelectTier,
   onStartDownload,
   onCancelDownload,
+  storageMode = "session",
+  onSetStorageMode,
+  onClearAllThreads,
 }) {
   const [activeTab, setActiveTab] = useState(localAIEnabled ? "local" : "cloud");
   const [detecting, setDetecting] = useState(true);
   const [recommendedTier, setRecommendedTier] = useState(null);
   const [deviceNote, setDeviceNote] = useState("");
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   useEffect(() => {
     setActiveTab(localAIEnabled ? "local" : "cloud");
@@ -135,11 +139,11 @@ export default function ModelSelectionModal({
               ⚡
             </span>
             <h2 id="model-modal-title" className="text-xl font-bold tracking-tight text-text m-0">
-              Select AI Engine & Model
+              Select AI Engine & Storage Settings
             </h2>
           </div>
           <p className="text-sm text-text-muted m-0 pl-12">
-            Choose how Stillpoint processes your text — via cloud Gemini API or 100% local on-device WebGPU.
+            Configure processing path (Gemini Cloud vs Local WebGPU) and manage on-device chat storage.
           </p>
         </div>
 
@@ -158,7 +162,7 @@ export default function ModelSelectionModal({
             <div className="text-left">
               <div className="leading-tight">Cloud Mode</div>
               <div className="text-[0.7rem] font-normal text-text-muted">
-                {user ? "Gemini 1.5 Flash" : "Requires sign-in"}
+                {user ? "Gemini 3.1 Flash" : "Requires sign-in"}
               </div>
             </div>
           </button>
@@ -191,7 +195,7 @@ export default function ModelSelectionModal({
               <div>
                 <h3 className="text-base font-bold text-text m-0 mb-1">Cloud Gemini Integration</h3>
                 <p className="text-sm text-text-muted m-0 leading-relaxed">
-                  Cloud mode sends only a minimal emotional summary to Google Gemini via a secure server proxy. Your raw text is never logged or stored.
+                  Cloud mode evaluates safety via a mandatory Crisis Gate before streaming directly with Google Gemini. Your text is never stored in any database or linked to user identity.
                 </p>
               </div>
             </div>
@@ -304,6 +308,69 @@ export default function ModelSelectionModal({
           </div>
         )}
 
+        {/* On-Device Storage & Retention Settings Card */}
+        <div className="mt-6 rounded-xl border border-border/50 bg-bg/40 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-text m-0 flex items-center gap-2">
+              <span>💾</span> On-Device Storage & Lifetime
+            </h3>
+            <span className="text-xs font-bold text-accent">Always 100% on device</span>
+          </div>
+
+          <p className="text-xs text-text-muted m-0 leading-relaxed">
+            All chat history is stored locally in your browser and is <strong>never sent to or stored in any database or cloud server</strong>.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div
+              onClick={() => onSetStorageMode && onSetStorageMode("session")}
+              className={`cursor-pointer rounded-xl border-2 p-3 text-xs transition-all ${
+                storageMode === "session"
+                  ? "border-accent bg-accent/10"
+                  : "border-border/60 bg-surface/70 hover:border-accent/40"
+              }`}
+            >
+              <div className="font-bold text-text mb-1 flex items-center justify-between">
+                <span>Session Storage (Default)</span>
+                {storageMode === "session" && <span className="text-accent font-bold">Active</span>}
+              </div>
+              <p className="text-[0.75rem] text-text-muted m-0 leading-relaxed">
+                Available during your active tab session. Automatically deleted when you close the browser tab.
+              </p>
+            </div>
+
+            <div
+              onClick={() => onSetStorageMode && onSetStorageMode("local")}
+              className={`cursor-pointer rounded-xl border-2 p-3 text-xs transition-all ${
+                storageMode === "local"
+                  ? "border-accent bg-accent/10"
+                  : "border-border/60 bg-surface/70 hover:border-accent/40"
+              }`}
+            >
+              <div className="font-bold text-text mb-1 flex items-center justify-between">
+                <span>Local Storage (Persistent)</span>
+                {storageMode === "local" && <span className="text-accent font-bold">Active</span>}
+              </div>
+              <p className="text-[0.75rem] text-text-muted m-0 leading-relaxed">
+                Saved on this device across browser restarts until manually cleared.
+              </p>
+            </div>
+          </div>
+
+          {onClearAllThreads && (
+            <div className="pt-2 flex items-center justify-between border-t border-border/30">
+              <span className="text-xs text-text-muted">Want to reset your local conversation state?</span>
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(true)}
+                className="rounded-lg bg-crisis/15 border border-crisis/30 px-3 py-1.5 text-xs font-bold text-crisis hover:bg-crisis hover:text-bg transition-colors"
+              >
+                Clear all chats
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Modal Footer */}
         <div className="mt-6 pt-4 border-t border-border/40 flex items-center justify-end gap-3">
           <button
@@ -321,6 +388,42 @@ export default function ModelSelectionModal({
         onConfirm={handlePrivacyConfirm}
         onCancel={() => setShowPrivacyModal(false)}
       />
+
+      {showClearConfirm && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm animate-backdrop-fade"
+          onClick={() => setShowClearConfirm(false)}
+        >
+          <div
+            className="w-full max-w-[400px] rounded-2xl border border-border/80 bg-surface p-6 shadow-2xl animate-modal-pop text-text"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold m-0 mb-2">Clear all chats?</h3>
+            <p className="text-sm text-text-muted mb-5">
+              This will permanently remove all conversation threads stored on this device.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="rounded-xl border border-border px-4 py-2 text-sm font-bold hover:bg-surface-raised"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearConfirm(false);
+                  onClearAllThreads();
+                }}
+                className="rounded-xl bg-crisis px-4 py-2 text-sm font-bold text-bg hover:bg-crisis/90"
+              >
+                Clear all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

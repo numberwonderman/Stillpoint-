@@ -3,20 +3,15 @@
  *
  * Server-side proxy to Gemini for signed-in users.
  *
- * Why this exists:
- *   - The Gemini API key lives ONLY on the server (GEMINI_API_KEY env var).
- *     No key ever reaches the browser, so users don't need to bring their
- *     own key — any signed-in user gets to use the cloud path.
+ * Flow:
  *   - The session cookie (set by /api/auth/login or /api/auth/signup) is
- *     the gatekeeper: only authenticated users may call this route.
- *   - The route is the only place that calls parser.js for the cloud path.
- *     The browser sends raw user text here, parser.js turns it into a
- *     minimal structured summary on this server, and only that summary is
- *     forwarded to Gemini. Raw text never leaves this process — it is
- *     never logged and never persisted.
- *   - For the Local AI path, raw text stays on-device and is fed directly
- *     to the on-device model by the client (see useStillpoint.js). The
- *     server is not involved on that path.
+ *     the gatekeeper: authenticated users may call this route.
+ *   - The route enforces a mandatory Crisis Gate first using parser.js.
+ *     If crisis signals are detected, Gemini is never called and crisis
+ *     resources are returned immediately.
+ *   - If no crisis signals trip, the original message (and recent conversation
+ *     context from session storage) is sent directly to Gemini.
+ *   - Messages are not stored in any database and are not linked to user identity.
  */
 
 import { NextResponse } from "next/server";
@@ -24,11 +19,6 @@ import { cookies } from "next/headers";
 import { GoogleGenAI } from "@google/genai";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/auth";
 import { parseInput } from "@/lib/parser";
-import {
-  CONTEXT_TAGS,
-  EMOTION_BUCKETS,
-  INTENSITY_MODIFIERS,
-} from "@/lib/lexicon";
 import {
   aiRateLimit,
   getRateLimitIdentifier,
@@ -41,28 +31,17 @@ const MODEL_NAME = "gemini-3.1-flash-lite";
 
 const SYSTEM_INSTRUCTION = `
 You are a supportive, grounding presence for someone who is having a
-difficult emotional moment. You will receive only a small structured
-summary — never the person's own words — describing broad emotion
-categories, an intensity level, any emotions they explicitly said they
-do NOT feel, and a general context tag.
+difficult emotional moment. You receive their message directly after a safety
+crisis gate check has confirmed they are not in immediate danger.
 
 Rules you must follow:
 - Do not diagnose, label, or speculate about any mental health condition.
-- Do not give medical, clinical, or crisis advice — a separate local
-  system already handles crisis situations before you are ever called.
-- Keep your response short: 2-4 sentences.
-- Be warm and validating without being clinical or generic.
-- Do not ask the person to describe their situation further; respond to
-  what's already summarized.
-- Do not reference "the data I was given" or the structured summary
-  itself — respond as if naturally supporting a person, not analyzing
-  a data payload.
-- If contextTag is "general_distress", do not guess at a specific cause.
-- If noEmotionsDetected is true, no specific emotion was recognized in
-  what the person wrote. Do NOT assume distress, sadness, or any
-  negative state in this case. Respond with brief, warm, neutral
-  acknowledgment instead (e.g. thanking them for checking in), and do
-  not invent feelings they didn't express.
+- Do not give medical, clinical, or crisis advice — a separate system already
+  handles crisis situations before you are ever called.
+- Keep your response concise: 2-4 warm, grounded sentences.
+- Be validating, supportive, and empathetic without being clinical or generic.
+- Do not ask intrusive questions; offer thoughtful, present, and compassionate responses.
+- If conversation history is provided, maintain context naturally as a caring conversation partner.
 `.trim();
 
 export async function POST(request) {
@@ -77,19 +56,12 @@ export async function POST(request) {
     );
   }
 
-  // 1b. Rate-limit after auth, before any Gemini work. The auth gate
-  //     already keeps anonymous traffic off this route; this limit
-  //     protects our Gemini budget from a single authenticated client
-  //     running up the bill. Per-IP because the session cookie is the
-  //     real identity and cookies are per-browser anyway.
+  // 1b. Rate-limit after auth, before any Gemini work.
   const limit = await aiRateLimit.limit(getRateLimitIdentifier(request));
   const limited = rateLimitResponse(limit);
   if (limited) return limited;
 
-  // 2. Parse the JSON body, which is the user's raw text input. We run
-  //    parser.js on this server to convert it into a minimal structured
-  //    summary that Gemini will receive. Raw text is held only in this
-  //    request's scope and is never logged or persisted.
+  // 2. Parse the JSON body: text and optional history.
   let body;
   try {
     body = await request.json();
@@ -106,21 +78,14 @@ export async function POST(request) {
     );
   }
   if (trimmed.length > 4000) {
-    // Cap input length so a single bad request can't pin a server thread
-    // or balloon a Gemini prompt. The textarea in the UI is already short;
-    // this is a server-side guardrail.
     return NextResponse.json(
       { error: "That message is too long. Please shorten it and try again." },
       { status: 413 }
     );
   }
 
+  // 3. Mandatory Crisis Gate — evaluated on every request before calling Gemini.
   const parsed = parseInput(trimmed);
-
-  // If the crisis gate fired, do not call Gemini at all. Surface the
-  // canonical crisis response so the client can render local resources
-  // the same way it does for the local-only path. Forward the severity
-  // tier so the panel can adapt its tone.
   if (parsed.isCrisis) {
     return NextResponse.json(
       { isCrisis: true, severity: parsed.severity || "elevated" },
@@ -128,38 +93,43 @@ export async function POST(request) {
     );
   }
 
-  const summary = {
-    emotions: parsed.emotions,
-    intensity: parsed.intensity,
-    negated: parsed.negated,
-    contextTag: parsed.contextTag,
-    noEmotionsDetected: parsed.noEmotionsDetected,
-  };
-
-  try {
-    validateSummaryShape(summary);
-  } catch (err) {
-    return NextResponse.json(
-      { error: err.message || "Malformed summary." },
-      { status: 400 }
-    );
-  }
-
-  // 3. Pull the server-held key. If it's missing, the deploy is misconfigured.
+  // 4. Pull the server-held key.
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    // Don't echo the env-var name to the user; just surface a clear failure.
     return NextResponse.json(
       { error: "Cloud responses are temporarily unavailable. Please try Local AI mode." },
       { status: 503 }
     );
   }
 
-  // 4. Call Gemini via streaming API.
+  // 5. Construct conversation contents (history + current message) for Gemini.
+  const contents = [];
+  if (Array.isArray(body.history)) {
+    for (const msg of body.history) {
+      if (
+        msg &&
+        typeof msg.text === "string" &&
+        msg.text.trim() &&
+        (msg.role === "user" || msg.role === "assistant" || msg.role === "model")
+      ) {
+        contents.push({
+          role: msg.role === "assistant" ? "model" : "user",
+          parts: [{ text: msg.text.trim() }],
+        });
+      }
+    }
+  }
+
+  contents.push({
+    role: "user",
+    parts: [{ text: trimmed }],
+  });
+
+  // 6. Call Gemini via streaming API.
   const ai = new GoogleGenAI({ apiKey });
   const geminiRequest = {
     model: MODEL_NAME,
-    contents: JSON.stringify(summary),
+    contents,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       temperature: 0.7,
@@ -172,8 +142,6 @@ export async function POST(request) {
     responseStream = await ai.models.generateContentStream(geminiRequest);
   } catch (err) {
     if (err && err.status === 429) {
-      // Free-tier rate limits are tight; one short retry resolves most
-      // momentary throttling without the user having to retry manually.
       await sleep(1500);
       try {
         responseStream = await ai.models.generateContentStream(geminiRequest);
@@ -226,52 +194,6 @@ export async function POST(request) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function validateSummaryShape(summary) {
-  if (!summary || typeof summary !== "object") {
-    throw new Error("Structured summary is missing.");
-  }
-  const requiredKeys = ["emotions", "intensity", "negated", "contextTag"];
-  for (const key of requiredKeys) {
-    if (!(key in summary)) {
-      throw new Error(`Structured summary is missing required field: ${key}`);
-    }
-  }
-  if (!Array.isArray(summary.emotions) || !Array.isArray(summary.negated)) {
-    throw new Error("Structured summary fields are malformed.");
-  }
-
-  // Enum-constrain every field. This is the abuse-mitigation surface:
-  // even if someone bypasses the parser and submits an arbitrary object,
-  // Gemini only ever sees a value from these closed sets. Caps on array
-  // length keep a crafted prompt from inflating the prompt payload.
-  const emotionBuckets = new Set(Object.keys(EMOTION_BUCKETS));
-  const intensityLevels = new Set(Object.keys(INTENSITY_MODIFIERS));
-  const contextTags = new Set(Object.keys(CONTEXT_TAGS));
-
-  if (summary.emotions.length > 8 || summary.negated.length > 8) {
-    throw new Error("Structured summary fields are malformed.");
-  }
-  for (const e of summary.emotions) {
-    if (typeof e !== "string" || !emotionBuckets.has(e)) {
-      throw new Error("Structured summary fields are malformed.");
-    }
-  }
-  for (const n of summary.negated) {
-    if (typeof n !== "string" || n.length === 0 || n.length > 64) {
-      throw new Error("Structured summary fields are malformed.");
-    }
-  }
-  if (typeof summary.intensity !== "string" || !intensityLevels.has(summary.intensity)) {
-    throw new Error("Structured summary fields are malformed.");
-  }
-  if (typeof summary.contextTag !== "string" || !contextTags.has(summary.contextTag)) {
-    throw new Error("Structured summary fields are malformed.");
-  }
-  if (summary.noEmotionsDetected !== undefined && typeof summary.noEmotionsDetected !== "boolean") {
-    throw new Error("Structured summary fields are malformed.");
-  }
 }
 
 function mapGeminiError(err) {

@@ -4,10 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ThreadList from "./ThreadList";
 import LogoutConfirmModal from "./LogoutConfirmModal";
+import ClearAllConfirmModal from "./ClearAllConfirmModal";
 
 /**
  * Sidebar — Left navigation panel with collapsible support.
- * Features: Brand header, New Chat button, Conversation list, Model selection modal trigger, and User Account with Log out button.
+ * Features: Brand header, New Chat button, Conversation list with on-device storage options,
+ * Clear All action, Model selection launcher, and User Account controls.
  */
 export default function Sidebar({
   threads,
@@ -18,6 +20,9 @@ export default function Sidebar({
   user,
   localAIEnabled,
   selectedTier,
+  storageMode = "session",
+  onSetStorageMode,
+  onClearAllThreads,
   onCloseMobile,
   isCollapsed,
   onToggleCollapse,
@@ -25,6 +30,7 @@ export default function Sidebar({
 }) {
   const router = useRouter();
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   function requestLogout() {
     setConfirmLogout(true);
@@ -35,7 +41,6 @@ export default function Sidebar({
   }
 
   async function handleLogout() {
-    // Close the modal first so the route change doesn't unmount it mid-animation.
     setConfirmLogout(false);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -44,6 +49,11 @@ export default function Sidebar({
     }
     router.push("/");
     router.refresh();
+  }
+
+  function handleConfirmClearAll() {
+    setConfirmClearAll(false);
+    if (onClearAllThreads) onClearAllThreads();
   }
 
   // Collapsed Sidebar View (Icon-only Rail for Desktop)
@@ -74,7 +84,7 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Middle: Model Modal Launcher Icon */}
+        {/* Middle: Model Modal Launcher & Clear Icon */}
         <div className="flex flex-col items-center gap-3">
           <button
             type="button"
@@ -84,6 +94,17 @@ export default function Sidebar({
           >
             {localAIEnabled ? "💻" : "☁️"}
           </button>
+
+          {threads && threads.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(true)}
+              title="Clear all chats"
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface-raised text-text-muted hover:text-crisis hover:bg-crisis/15 transition-all text-xs"
+            >
+              🗑️
+            </button>
+          )}
         </div>
 
         {/* Bottom: User Avatar / Logout */}
@@ -108,6 +129,12 @@ export default function Sidebar({
             </button>
           )}
         </div>
+
+        <ClearAllConfirmModal
+          open={confirmClearAll}
+          onConfirm={handleConfirmClearAll}
+          onCancel={() => setConfirmClearAll(false)}
+        />
       </div>
     );
   }
@@ -167,11 +194,24 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Scrollable Thread History */}
-      <div className="flex-1 min-h-0 overflow-y-auto py-2">
-        <div className="px-3.5 pb-2 text-[0.7rem] font-semibold uppercase tracking-wider text-text-muted/70">
-          Conversations
+      {/* Scrollable Thread History & On-Device Storage Controls */}
+      <div className="flex-1 min-h-0 overflow-y-auto py-2 space-y-3">
+        <div className="flex items-center justify-between px-3.5 pt-1">
+          <span className="text-[0.7rem] font-semibold uppercase tracking-wider text-text-muted/70">
+            Conversations
+          </span>
+          {threads && threads.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(true)}
+              className="text-[0.7rem] font-bold text-crisis hover:underline flex items-center gap-1"
+              title="Clear all conversation threads"
+            >
+              <span>Clear all</span>
+            </button>
+          )}
         </div>
+
         <ThreadList
           threads={threads}
           activeThreadId={activeThreadId}
@@ -181,6 +221,58 @@ export default function Sidebar({
           }}
           onDeleteThread={onDeleteThread}
         />
+
+        {/* On-Device Storage Info & Persistence Toggle Card */}
+        <div className="mx-3 rounded-xl border border-border/40 bg-bg/50 p-3 space-y-2 text-xs">
+          <div className="flex items-center justify-between font-bold text-text">
+            <span className="flex items-center gap-1.5 text-accent">
+              <span>🔒</span> On-Device Storage
+            </span>
+            <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[0.65rem] font-bold text-accent">
+              {storageMode === "local" ? "LocalStorage" : "SessionStorage"}
+            </span>
+          </div>
+
+          <p className="m-0 text-[0.75rem] leading-relaxed text-text-muted">
+            {storageMode === "session" ? (
+              <span>
+                <strong>Session mode:</strong> Active while tab is open. Automatically cleared when you close the browser tab.
+              </span>
+            ) : (
+              <span>
+                <strong>Local mode:</strong> Saved on this device. Retained across browser restarts until manually cleared.
+              </span>
+            )}
+          </p>
+
+          {/* Storage Mode Toggle Buttons */}
+          {onSetStorageMode && (
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/30 bg-surface p-1 pt-1">
+              <button
+                type="button"
+                onClick={() => onSetStorageMode("session")}
+                className={`rounded-md py-1 px-2 text-[0.7rem] font-bold transition-all ${
+                  storageMode === "session"
+                    ? "bg-accent text-bg shadow-sm"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                Session (Auto-clear)
+              </button>
+              <button
+                type="button"
+                onClick={() => onSetStorageMode("local")}
+                className={`rounded-md py-1 px-2 text-[0.7rem] font-bold transition-all ${
+                  storageMode === "local"
+                    ? "bg-accent text-bg shadow-sm"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                Local (Persistent)
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Bottom Footer Section: Model Modal Launcher & Account / Logout */}
@@ -197,7 +289,7 @@ export default function Sidebar({
               {localAIEnabled ? `Local AI (${selectedTier || "medium"})` : "Cloud Mode (Gemini)"}
             </span>
           </div>
-          <span className="text-xs text-accent font-semibold ml-2 shrink-0">Change</span>
+          <span className="text-xs text-accent font-semibold ml-2 shrink-0">Settings</span>
         </button>
 
         {/* User Account & Bottom-Left Logout Button */}
@@ -251,6 +343,12 @@ export default function Sidebar({
         open={confirmLogout}
         onConfirm={handleLogout}
         onCancel={cancelLogout}
+      />
+
+      <ClearAllConfirmModal
+        open={confirmClearAll}
+        onConfirm={handleConfirmClearAll}
+        onCancel={() => setConfirmClearAll(false)}
       />
     </div>
   );

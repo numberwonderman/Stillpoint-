@@ -27,7 +27,11 @@ export function useSpeechRecognition({
   const recognitionRef = useRef(null);
   const onFinalRef = useRef(onFinal);
 
-  const [supported, setSupported] = useState(false);
+  const [supported, setSupported] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const w = /** @type {any} */ (window);
+    return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+  });
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [final, setFinal] = useState("");

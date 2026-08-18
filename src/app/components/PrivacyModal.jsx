@@ -54,8 +54,7 @@ export default function PrivacyModal({ open, onConfirm, onCancel }) {
         </div>
 
         <p id="privacy-modal-desc" className="mb-3 text-base text-text-muted">
-          Local AI mode runs entirely on your device. Nothing — not even the
-          short emotion summary — is ever sent anywhere.
+          Local AI mode runs entirely on your device. Nothing is ever sent to any server.
         </p>
         <p className="mb-5 rounded-[10px] border border-focus/40 bg-focus/10 px-4 py-3 text-[0.95rem] text-text">
           <strong>Trade-off:</strong> the on-device model is much smaller than

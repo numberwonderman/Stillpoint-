@@ -35,6 +35,9 @@ export default function AppPage() {
           user={state.user}
           localAIEnabled={state.localAIEnabled}
           selectedTier={state.selectedTier}
+          storageMode={state.storageMode}
+          onSetStorageMode={actions.setStorageMode}
+          onClearAllThreads={actions.clearAllThreads}
           onCloseMobile={() => setMobileSidebarOpen(false)}
           isCollapsed={desktopSidebarCollapsed}
           onToggleCollapse={() => setDesktopSidebarCollapsed((prev) => !prev)}
@@ -112,6 +115,9 @@ export default function AppPage() {
         onSelectTier={actions.setSelectedTier}
         onStartDownload={actions.startDownload}
         onCancelDownload={actions.cancelDownload}
+        storageMode={state.storageMode}
+        onSetStorageMode={actions.setStorageMode}
+        onClearAllThreads={actions.clearAllThreads}
       />
 
       {/* Auth Gating Modal */}

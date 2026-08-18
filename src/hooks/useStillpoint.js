@@ -69,10 +69,94 @@ export function useStillpoint() {
   // Crisis region: "us" | "intl" | null. Persisted in localStorage
   const [crisisRegion, setCrisisRegion] = useState(null);
 
-  // Helper to update threads in state
-  const persistThreads = (updatedThreads) => {
+  // Storage mode preference: "session" (default, cleared on tab close) | "local" (persisted on device)
+  const [storageMode, setStorageModeState] = useState("session");
+
+  // Helper to update threads in state and active storage engine
+  const persistThreads = useCallback((updatedThreads, targetMode = storageMode) => {
     setThreads(updatedThreads);
-  };
+    try {
+      const storage = targetMode === "local" ? window.localStorage : window.sessionStorage;
+      storage.setItem("stillpoint:threads", JSON.stringify(updatedThreads));
+    } catch {
+      /* storage unavailable */
+    }
+  }, [storageMode]);
+
+  // Switch storage mode: transfers threads from current storage engine to target storage engine
+  const setStorageMode = useCallback((newMode) => {
+    if (newMode !== "session" && newMode !== "local") return;
+    setStorageModeState(newMode);
+    try {
+      window.localStorage.setItem("stillpoint:storageMode", newMode);
+      const targetStorage = newMode === "local" ? window.localStorage : window.sessionStorage;
+      const oldStorage = newMode === "local" ? window.sessionStorage : window.localStorage;
+
+      // Transfer current threads and active ID to target storage
+      targetStorage.setItem("stillpoint:threads", JSON.stringify(threads));
+      if (activeThreadId) {
+        targetStorage.setItem("stillpoint:activeThreadId", activeThreadId);
+      } else {
+        targetStorage.removeItem("stillpoint:activeThreadId");
+      }
+
+      // Clear from old storage engine
+      oldStorage.removeItem("stillpoint:threads");
+      oldStorage.removeItem("stillpoint:activeThreadId");
+    } catch {
+      /* storage error */
+    }
+  }, [threads, activeThreadId]);
+
+  // Clear all threads completely from state and both storage engines
+  const clearAllThreads = useCallback(() => {
+    setThreads([]);
+    setActiveThreadId(null);
+    setError("");
+    setStatus("");
+    try {
+      window.sessionStorage.removeItem("stillpoint:threads");
+      window.sessionStorage.removeItem("stillpoint:activeThreadId");
+      window.localStorage.removeItem("stillpoint:threads");
+      window.localStorage.removeItem("stillpoint:activeThreadId");
+    } catch {}
+  }, []);
+
+  // Restore stored storageMode preference and threads on mount
+  useEffect(() => {
+    try {
+      const savedMode = window.localStorage.getItem("stillpoint:storageMode");
+      const activeMode = savedMode === "local" ? "local" : "session";
+      setStorageModeState(activeMode);
+
+      const targetStorage = activeMode === "local" ? window.localStorage : window.sessionStorage;
+      const savedThreads = targetStorage.getItem("stillpoint:threads");
+      const savedActiveId = targetStorage.getItem("stillpoint:activeThreadId");
+      if (savedThreads) {
+        const parsed = JSON.parse(savedThreads);
+        if (Array.isArray(parsed)) setThreads(parsed);
+      }
+      if (savedActiveId) {
+        setActiveThreadId(savedActiveId);
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
+  // Sync activeThreadId to current active storage engine
+  useEffect(() => {
+    try {
+      const storage = storageMode === "local" ? window.localStorage : window.sessionStorage;
+      if (activeThreadId) {
+        storage.setItem("stillpoint:activeThreadId", activeThreadId);
+      } else {
+        storage.removeItem("stillpoint:activeThreadId");
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, [activeThreadId, storageMode]);
 
   // WebGPU availability check
   useEffect(() => {
@@ -136,17 +220,26 @@ export function useStillpoint() {
         if (activeThreadId === id) {
           setActiveThreadId(updated.length > 0 ? updated[0].id : null);
         }
+        try {
+          const storage = storageMode === "local" ? window.localStorage : window.sessionStorage;
+          storage.setItem("stillpoint:threads", JSON.stringify(updated));
+        } catch {}
         return updated;
       });
     },
-    [activeThreadId]
+    [activeThreadId, storageMode]
   );
 
   const updateThreadTitle = useCallback((id, newTitle) => {
     setThreads((prevThreads) => {
-      return prevThreads.map((t) => (t.id === id ? { ...t, title: newTitle } : t));
+      const updated = prevThreads.map((t) => (t.id === id ? { ...t, title: newTitle } : t));
+      try {
+        const storage = storageMode === "local" ? window.localStorage : window.sessionStorage;
+        storage.setItem("stillpoint:threads", JSON.stringify(updated));
+      } catch {}
+      return updated;
     });
-  }, []);
+  }, [storageMode]);
 
   // Local AI actions
   const startDownload = useCallback(async (tier) => {
@@ -289,7 +382,17 @@ export function useStillpoint() {
         return;
       }
 
-      // Non-crisis flow: add user message and pending streaming assistant message
+      // Non-crisis flow: extract conversation history for cloud mode
+      const activeThreadObj = currentThreads.find((t) => t.id === currentThreadId);
+      const existingMessages = activeThreadObj ? activeThreadObj.messages : [];
+      const history = existingMessages
+        .filter((m) => m.text && !m.crisis)
+        .map((m) => ({
+          role: m.role,
+          text: m.text,
+        }));
+
+      // Add user message and pending streaming assistant message
       const assistantMsgId = generateId();
       const initialAssistantMsg = {
         id: assistantMsgId,
@@ -309,7 +412,7 @@ export function useStillpoint() {
       // Helper to update streaming assistant message text & status
       const updateAssistantMsg = (updateFn) => {
         setThreads((prev) => {
-          return prev.map((t) => {
+          const updated = prev.map((t) => {
             if (t.id !== currentThreadId) return t;
             const updatedMessages = t.messages.map((m) => {
               if (m.id !== assistantMsgId) return m;
@@ -317,6 +420,11 @@ export function useStillpoint() {
             });
             return { ...t, messages: updatedMessages };
           });
+          try {
+            const storage = storageMode === "local" ? window.localStorage : window.sessionStorage;
+            storage.setItem("stillpoint:threads", JSON.stringify(updated));
+          } catch {}
+          return updated;
         });
       };
 
@@ -338,6 +446,7 @@ export function useStillpoint() {
 
       await runCloudPipeline(
         trimmed,
+        history,
         setStatus,
         setError,
         setAuthRequiredOpen,
@@ -346,7 +455,7 @@ export function useStillpoint() {
         updateAssistantMsg
       );
     },
-    [activeThreadId, threads, selectedTier, localAIInferring, isGenerating, user]
+    [activeThreadId, threads, selectedTier, localAIInferring, isGenerating, user, storageMode]
   );
 
   return {
@@ -372,10 +481,11 @@ export function useStillpoint() {
       user,
       authRequiredOpen,
       authRequiredMode,
-      // Thread state
+      // Thread & Storage state
       threads,
       activeThreadId,
       messages,
+      storageMode,
     },
     actions: {
       submit,
@@ -389,6 +499,8 @@ export function useStillpoint() {
       selectThread,
       deleteThread,
       updateThreadTitle,
+      setStorageMode,
+      clearAllThreads,
       closeAuthRequired: () => {
         setAuthRequiredOpen(false);
         setAuthRequiredMode("anonymous");
@@ -467,6 +579,7 @@ class TokenQueue {
 
 async function runCloudPipeline(
   trimmed,
+  history,
   setStatus,
   setError,
   setAuthRequiredOpen,
@@ -482,7 +595,7 @@ async function runCloudPipeline(
     const res = await fetch("/api/support", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: trimmed }),
+      body: JSON.stringify({ text: trimmed, history }),
     });
 
     if (res.status === 401) {

@@ -191,9 +191,8 @@ function CloudModePanel({ user }) {
           Signed in as <span className="text-accent">{user.email}</span>
         </p>
         <p className="m-0 text-[0.9rem] text-text-muted">
-          The cloud model uses a server-held Gemini key. Only a short,
-          general summary of your emotions is ever sent — and never
-          during a crisis.
+          The cloud model uses a server-held Gemini key. Your message passes
+          through a crisis gate first, and no conversation history is ever stored in a database.
         </p>
       </div>
     );
@@ -205,7 +204,7 @@ function CloudModePanel({ user }) {
         The cloud model needs a sign-in.
       </p>
       <p className="m-0 mb-4 text-[0.9rem] leading-relaxed text-text-muted">
-        We don&apos;t store your words — but we do need an account so the
+        We don&apos;t store your messages in any database — but we do need an account so the
         server can authorize the request. Or, you can switch to Local AI
         on the right and skip the sign-in entirely.
       </p>

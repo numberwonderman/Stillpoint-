@@ -17,13 +17,7 @@ Stillpoint has two response paths, and they handle your words differently
 on purpose.
 
 **Cloud path** — the typed text is sent to `/api/support` on the server.
-The server runs a small rule-based parser that extracts only a minimal,
-structured summary (broad emotion categories, an intensity level, any
-emotions you explicitly said you don't feel, and a general context tag).
-It's that summary — never your original words — that is forwarded to
-Gemini for a supportive response. The Gemini API key lives only on the
-server; raw text is held only for the duration of that request, never
-logged, and never persisted.
+After passing through a mandatory **Crisis Gate**, the original message (and recent conversation turns maintained in browser `sessionStorage`) is sent directly to Gemini. The Gemini API key lives only on the server; conversational messages are never logged or stored in any database.
 
 **Local AI path** — if you've turned on Local AI mode, your typed text
 stays on your device. It is fed directly to the on-device model that
@@ -41,15 +35,16 @@ Web Worker). The server is never contacted on this path.
               │                                       │
               ▼                                       ▼
      raw text to on-device           raw text → /api/support
-     model in browser                → server-side parser
-     (no network call)               → structured summary
-              │                                       │
-              ▼                                       ▼
-     streamed response                response from Gemini
-     in the UI                        returned to the UI
+     model in browser                → server crisis gate
+     (no network call)               → direct message to Gemini
+              │                        (session storage context)
+              ▼                                       │
+     streamed response                        ▼
+     in the UI                       response from Gemini
+                                     returned to the UI
 ```
 
-The client also runs the same parser's crisis gate first, before either
+The client also runs the same crisis gate first, before either
 path is taken. If the gate fires — for language associated with suicidal
 ideation or self-harm — Stillpoint **never calls Gemini and never talks
 to the local model**. Instead it immediately shows a crisis panel with
@@ -60,32 +55,20 @@ generation was in flight, it is aborted so the panel doesn't appear next
 to a half-finished AI reply. This check happens in the browser and does
 not depend on having an API key configured, a session cookie, or a
 working network connection. The server runs the same gate independently
-as a second line of defense, and `runLocalAI` re-runs it as a
-defense-in-depth hard stop before handing text to the worker.
+as a second line of defense.
 
 ## Why this design
 
-Most AI-powered mental health tools send your full, raw message to a
-third-party API. Stillpoint is more conservative: on the cloud path, it
-sends only the smallest possible signal — a structured summary, not your
-words — to Gemini, and the parser runs on the server so the endpoint
-can't be used as an open proxy to Gemini. On the Local AI path, nothing
-leaves your device at all. The crisis safety net is duplicated client-
-side and server-side so it works whether or not anything else is online.
+Stillpoint protects user privacy through ephemeral data retention: conversation context is kept only in browser `sessionStorage` during your session and is never persisted to any database. On the cloud path, messages are decoupled from user identity and protected by a mandatory Crisis Gate. On the Local AI path, nothing leaves your device at all.
 
 ## Features
 
-- **Local-first parsing** — emotion detection, negation handling, and
-  intensity scoring all happen in-browser, with no network call involved.
+- **Browser session storage** — active threads and chat history remain in `sessionStorage` for context continuity without permanent database retention.
 - **Crisis gate** — a dedicated, always-first check for crisis language that
   bypasses the AI entirely and shows hardcoded support resources.
-- **Bring your own key (BYOK)** is no longer required — the cloud path now
-  uses a server-held key, so any signed-in user can use it. If you'd
+- **Bring your own key (BYOK)** is no longer required — the cloud path uses a server-held key, so any signed-in user can use it. If you'd
   rather keep everything on-device, toggle **Local AI mode** in Settings.
-- **Server-side parsing on the cloud path** — the rule-based parser runs
-  on the server before anything is sent to Gemini, so Gemini only ever
-  sees a minimal structured summary and the endpoint can't be used as
-  an open proxy.
+- **Direct streaming with Gemini** — after passing the Crisis Gate, messages flow directly to Gemini to preserve nuance and conversational quality.
 - **Accessibility-first UI** — set in [Atkinson Hyperlegible
   Next](https://brailleinstitute.org/freefont), a typeface designed by the
   Braille Institute for low-vision readability. High-contrast dark palette,

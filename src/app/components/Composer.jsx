@@ -196,34 +196,44 @@ export default function Composer({
                 <span className="hidden sm:inline text-xs text-text-muted/60">Press Enter ↵</span>
               )}
 
-              {/* Mic button — only render if browser supports Web Speech */}
-              {sttSupported && (
-                <button
-                  type="button"
-                  onClick={toggleMic}
-                  aria-label={listening ? "Stop dictation" : "Start dictation"}
-                  title={listening ? "Stop dictation" : "Speak to type"}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border transition-all ${
-                    listening
-                      ? "bg-crisis/15 border-crisis/40 text-crisis animate-pulse"
-                      : "bg-surface-raised/60 border-border/30 text-text-muted hover:text-accent hover:border-accent/40"
-                  }`}
-                >
-                  {listening ? (
-                    // stop icon
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg>
-                  ) : (
-                    // mic icon
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" y1="19" x2="12" y2="22" />
-                    </svg>
-                  )}
-                </button>
-              )}
+              {/* Mic button — always rendered so user sees mic option even before clicking input area */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (sttSupported) {
+                    toggleMic();
+                  } else if (typeof window !== "undefined") {
+                    alert("Speech-to-text is not supported in this browser. Please use Chrome, Edge, or Safari.");
+                  }
+                }}
+                aria-label={listening ? "Stop dictation" : "Start voice dictation"}
+                title={
+                  !sttSupported
+                    ? "Speech-to-text not supported in this browser"
+                    : listening
+                      ? "Stop dictation"
+                      : "Voice dictation (speech-to-text)"
+                }
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] border transition-all ${
+                  listening
+                    ? "bg-crisis/15 border-crisis/40 text-crisis animate-pulse shadow-sm"
+                    : "bg-surface-raised/80 border-border/40 text-text-muted hover:text-accent hover:border-accent/60"
+                }`}
+              >
+                {listening ? (
+                  // stop icon
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                ) : (
+                  // mic icon
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
+                  </svg>
+                )}
+              </button>
 
               <button
                 type="submit"
