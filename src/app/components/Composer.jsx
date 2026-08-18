@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+import { MODEL_CATALOG } from "@/lib/localai";
 
 /**
  * Composer — anchored input box at the bottom of the chat container.
@@ -23,7 +24,12 @@ export default function Composer({
   isDownloading = false,
   localAIEnabled,
   selectedTier,
+  downloadState,
+  readyModelKey,
   onOpenModelModal,
+  onEnableLocalAI,
+  onDisableLocalAI,
+  onSelectTier,
 }) {
   const [text, setText] = useState("");
   const textareaRef = useRef(null);
@@ -56,6 +62,20 @@ export default function Composer({
   // For simplicity here, we mirror interim into a ref and reflect it via
   // a styled ghost layer behind the textarea.
   const [showMicHint, setShowMicHint] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const pickerRef = useRef(null);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!showModelPicker) return;
+    function handleOutside(e) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowModelPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [showModelPicker]);
 
   // Auto-resize textarea based on content height
   useEffect(() => {
@@ -174,19 +194,99 @@ export default function Composer({
           )}
 
           <div className="flex items-center justify-between px-3.5 pb-3 pt-1 border-t border-border/20">
-            <button
-              type="button"
-              onClick={onOpenModelModal}
-              title="Click to change model settings"
-              className="text-xs font-semibold text-text-muted hover:text-accent transition-colors flex items-center gap-1.5 bg-surface-raised/60 hover:bg-surface-raised px-2.5 py-1 rounded-lg border border-border/30"
-            >
-              {localAIEnabled ? (
-                <span>💻 Local AI ({selectedTier || "medium"})</span>
-              ) : (
-                <span>☁️ Cloud Mode</span>
+            {/* Model picker trigger */}
+            <div className="relative" ref={pickerRef}>
+              <button
+                type="button"
+                id="model-picker-trigger"
+                onClick={() => setShowModelPicker((v) => !v)}
+                className="flex items-center gap-1.5 rounded-lg border border-border/40 bg-surface-raised/60 px-2.5 py-1 text-xs font-semibold text-text-muted hover:text-accent hover:border-accent/40 transition-all"
+              >
+                <span>{localAIEnabled ? "💻" : "☁️"}</span>
+                <span className="max-w-[90px] truncate">
+                  {localAIEnabled
+                    ? (MODEL_CATALOG[selectedTier]?.label ?? selectedTier ?? "Local")
+                    : "Cloud"}
+                </span>
+                {/* Chevron up/down */}
+                <svg
+                  width="10" height="10" viewBox="0 0 10 10" fill="none"
+                  className={`transition-transform duration-200 ${showModelPicker ? "rotate-180" : ""}`}
+                >
+                  <path d="M2 6.5L5 3.5L8 6.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+
+              {/* Upward-opening picker panel */}
+              {showModelPicker && (
+                <div
+                  role="listbox"
+                  aria-label="Select AI model"
+                  className="absolute bottom-full left-0 mb-2 w-64 rounded-xl border border-border/50 bg-surface shadow-2xl z-30 overflow-hidden animate-modal-pop"
+                >
+                  {/* Cloud option */}
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={!localAIEnabled}
+                    onClick={() => { onDisableLocalAI?.(); setShowModelPicker(false); }}
+                    className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors ${
+                      !localAIEnabled
+                        ? "bg-accent/10 text-accent"
+                        : "text-text-muted hover:bg-surface-raised hover:text-text"
+                    }`}
+                  >
+                    <span className="text-base">☁️</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold">Cloud (Gemini)</div>
+                      <div className="text-[0.67rem] opacity-70">Fast · Requires internet</div>
+                    </div>
+                    {!localAIEnabled && <span className="text-[0.65rem] font-bold text-accent">✓ Active</span>}
+                  </button>
+
+                  <div className="mx-3 border-t border-border/30 my-1" />
+                  <div className="px-3.5 py-1 text-[0.65rem] font-bold uppercase tracking-widest text-text-muted/60">On-Device Models</div>
+
+                  {/* Local model tiers */}
+                  {Object.entries(MODEL_CATALOG).map(([key, meta]) => {
+                    const isActive = localAIEnabled && selectedTier === key;
+                    const isDownloaded = readyModelKey === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        onClick={() => {
+                          onEnableLocalAI?.();
+                          onSelectTier?.(key);
+                          setShowModelPicker(false);
+                        }}
+                        className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors ${
+                          isActive
+                            ? "bg-accent/10 text-accent"
+                            : "text-text-muted hover:bg-surface-raised hover:text-text"
+                        }`}
+                      >
+                        <span className="text-base">💻</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-semibold">{meta.label}</span>
+                            <span className="text-[0.62rem] opacity-60">{meta.params} · {meta.approxSizeLabel}</span>
+                          </div>
+                          <div className="text-[0.67rem] opacity-60 truncate">{meta.blurb}</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-0.5 shrink-0">
+                          {isActive && <span className="text-[0.65rem] font-bold text-accent">✓ Active</span>}
+                          {isDownloaded && !isActive && <span className="text-[0.65rem] text-accent/70">✓ Cached</span>}
+                          {!isDownloaded && <span className="text-[0.62rem] opacity-40">Not downloaded</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-              <span className="text-[0.65rem] text-accent font-bold">⚙️</span>
-            </button>
+            </div>
 
             <div className="flex items-center gap-2">
               {isGenerating && text.trim() ? (

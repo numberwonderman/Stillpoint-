@@ -8,6 +8,7 @@ import MessageList from "../components/MessageList";
 import Composer from "../components/Composer";
 import AuthRequiredModal from "../components/AuthRequiredModal";
 import ModelSelectionModal from "../components/ModelSelectionModal";
+import Toast from "../components/Toast";
 
 /**
  * AppPage — Main chat workspace.
@@ -47,34 +48,30 @@ export default function AppPage() {
     >
       {/* Floating Toggle Button for Mobile and Collapsed Desktop */}
       <div className="absolute top-3 left-3 z-20 flex items-center gap-2">
-        {(mobileSidebarOpen || desktopSidebarCollapsed) && (
+        {desktopSidebarCollapsed && (
           <button
             type="button"
-            onClick={() => {
-              if (window.innerWidth < 768) {
-                setMobileSidebarOpen(true);
-              } else {
-                setDesktopSidebarCollapsed(false);
-              }
-            }}
+            onClick={() => setDesktopSidebarCollapsed(false)}
             aria-label="Expand sidebar"
             title="Expand sidebar"
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface/90 border border-border/60 text-text-muted hover:text-text hover:bg-surface-raised transition-all backdrop-blur-md shadow-md"
+            className="hidden md:flex h-9 w-9 items-center justify-center rounded-xl bg-surface/90 border border-border/60 text-text-muted hover:text-text hover:bg-surface-raised transition-all backdrop-blur-md shadow-md"
           >
             ☰
           </button>
         )}
 
         {/* Mobile menu trigger when sidebar is hidden on small screens */}
-        <button
-          type="button"
-          onClick={() => setMobileSidebarOpen(true)}
-          aria-label="Open sidebar"
-          title="Open menu"
-          className="flex md:hidden h-9 w-9 items-center justify-center rounded-xl bg-surface/90 border border-border/60 text-text-muted hover:text-text hover:bg-surface-raised transition-all backdrop-blur-md shadow-md"
-        >
-          ☰
-        </button>
+        {!mobileSidebarOpen && (
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="Open sidebar"
+            title="Open menu"
+            className="flex md:hidden h-9 w-9 items-center justify-center rounded-xl bg-surface/90 border border-border/60 text-text-muted hover:text-text hover:bg-surface-raised transition-all backdrop-blur-md shadow-md"
+          >
+            ☰
+          </button>
+        )}
       </div>
 
       {/* Main Chat Scroll View */}
@@ -83,6 +80,9 @@ export default function AppPage() {
         status={state.status}
         error={state.error}
         localAIInferring={state.localAIInferring}
+        localAIStatus={state.localAIStatus}
+        downloadProgress={state.downloadProgress}
+        downloadText={state.downloadText}
         crisisRegion={state.crisisRegion}
         onChooseCrisisRegion={actions.chooseCrisisRegion}
       />
@@ -95,7 +95,12 @@ export default function AppPage() {
         isDownloading={state.downloadState === "downloading"}
         localAIEnabled={state.localAIEnabled}
         selectedTier={state.selectedTier}
+        downloadState={state.downloadState}
+        readyModelKey={state.readyModelKey}
         onOpenModelModal={() => setModelModalOpen(true)}
+        onEnableLocalAI={actions.enableLocalAI}
+        onDisableLocalAI={actions.disableLocalAI}
+        onSelectTier={actions.setSelectedTier}
       />
 
       {/* Centered Backdrop-Blurred Model Selection Modal */}
@@ -130,6 +135,15 @@ export default function AppPage() {
         onEnableLocalAI={actions.enableLocalAI}
         onClose={actions.closeAuthRequired}
       />
+
+      {/* Storage Migration Toast */}
+      {state.storageMigrationToast && (
+        <Toast
+          message={state.storageMigrationToast}
+          variant="info"
+          onDismiss={actions.dismissStorageToast}
+        />
+      )}
     </ChatShell>
   );
 }
