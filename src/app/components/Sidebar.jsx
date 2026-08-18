@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ThreadList from "./ThreadList";
+import LogoutConfirmModal from "./LogoutConfirmModal";
 
 /**
  * Sidebar — Left navigation panel with collapsible support.
@@ -22,8 +24,19 @@ export default function Sidebar({
   onOpenModelModal,
 }) {
   const router = useRouter();
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  function requestLogout() {
+    setConfirmLogout(true);
+  }
+
+  function cancelLogout() {
+    setConfirmLogout(false);
+  }
 
   async function handleLogout() {
+    // Close the modal first so the route change doesn't unmount it mid-animation.
+    setConfirmLogout(false);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
@@ -78,7 +91,7 @@ export default function Sidebar({
           {user ? (
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={requestLogout}
               title={`Log out (${user.email})`}
               className="flex h-9 w-9 items-center justify-center rounded-full bg-accent/20 text-accent font-bold text-xs hover:bg-crisis/20 hover:text-crisis transition-colors"
             >
@@ -201,7 +214,7 @@ export default function Sidebar({
               </div>
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={requestLogout}
                 title="Log out of your account"
                 className="shrink-0 rounded-lg border border-border/60 bg-surface-raised px-2.5 py-1 text-xs font-bold text-text-muted hover:border-crisis hover:text-crisis transition-colors flex items-center gap-1"
               >
@@ -233,6 +246,12 @@ export default function Sidebar({
           )}
         </div>
       </div>
+
+      <LogoutConfirmModal
+        open={confirmLogout}
+        onConfirm={handleLogout}
+        onCancel={cancelLogout}
+      />
     </div>
   );
 }

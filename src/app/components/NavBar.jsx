@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import LogoutConfirmModal from "./LogoutConfirmModal";
 
 /**
  * NavBar — global top navigation. Checks /api/auth/me on mount to render
@@ -13,6 +14,7 @@ export default function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState(undefined); // undefined = loading, null = signed out
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,7 +31,17 @@ export default function NavBar() {
     };
   }, [pathname]);
 
+  function requestLogout() {
+    setConfirmLogout(true);
+  }
+
+  function cancelLogout() {
+    setConfirmLogout(false);
+  }
+
   async function handleLogout() {
+    // Close the modal first so the route change doesn't unmount it mid-animation.
+    setConfirmLogout(false);
     await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     router.push("/");
@@ -76,7 +88,7 @@ export default function NavBar() {
             <span className="hidden text-text-muted sm:inline">{user.email}</span>
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={requestLogout}
               className="rounded-[8px] border border-border px-4 py-2 font-bold transition-colors hover:border-accent"
             >
               Log out
@@ -84,6 +96,12 @@ export default function NavBar() {
           </>
         )}
       </div>
+
+      <LogoutConfirmModal
+        open={confirmLogout}
+        onConfirm={handleLogout}
+        onCancel={cancelLogout}
+      />
     </nav>
   );
 }
