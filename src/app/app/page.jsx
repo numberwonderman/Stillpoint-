@@ -90,6 +90,7 @@ export default function AppPage() {
       {/* Bottom Composer Bar */}
       <Composer
         onSubmit={actions.submit}
+        onStopGeneration={actions.stopGeneration}
         isGenerating={state.isGenerating || state.localAIInferring}
         isDownloading={state.downloadState === "downloading"}
         localAIEnabled={state.localAIEnabled}

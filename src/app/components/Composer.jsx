@@ -17,6 +17,7 @@ import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
  */
 export default function Composer({
   onSubmit,
+  onStopGeneration,
   disabled = false,
   isGenerating = false,
   isDownloading = false,
@@ -235,20 +236,26 @@ export default function Composer({
                 )}
               </button>
 
-              <button
-                type="submit"
-                disabled={isSendDisabled}
-                className="flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] bg-accent px-3.5 py-1 text-xs font-semibold text-bg transition-all hover:bg-accent-strong hover:text-text disabled:cursor-not-allowed disabled:opacity-30 shadow-sm"
-              >
-                {isGenerating ? (
-                  <span>Generating…</span>
-                ) : (
-                  <>
-                    <span>Send</span>
-                    <span aria-hidden="true" className="text-xs">➔</span>
-                  </>
-                )}
-              </button>
+              {isGenerating ? (
+                <button
+                  type="button"
+                  onClick={onStopGeneration}
+                  title="Pause AI response"
+                  className="flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] bg-crisis/15 border border-crisis/40 px-3.5 py-1 text-xs font-bold text-crisis hover:bg-crisis hover:text-bg transition-all shadow-sm"
+                >
+                  <span className="text-xs">⏹</span>
+                  <span>Pause AI</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={isSendDisabled}
+                  className="flex h-8 shrink-0 items-center gap-1.5 rounded-[9px] bg-accent px-3.5 py-1 text-xs font-semibold text-bg transition-all hover:bg-accent-strong hover:text-text disabled:cursor-not-allowed disabled:opacity-30 shadow-sm"
+                >
+                  <span>Send</span>
+                  <span aria-hidden="true" className="text-xs">➔</span>
+                </button>
+              )}
             </div>
           </div>
         </form>

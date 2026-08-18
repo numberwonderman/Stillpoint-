@@ -42,6 +42,7 @@ function truncateTitle(text) {
 
 export function useStillpoint() {
   const useLocalAIRef = useRef(false);
+  const abortControllerRef = useRef(null);
 
   // Threads & active thread state
   const [threads, setThreads] = useState([]);
@@ -240,6 +241,37 @@ export function useStillpoint() {
       return updated;
     });
   }, [storageMode]);
+
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (localAIInferring || useLocalAIRef.current) {
+      abortLocalAIInfight();
+    }
+    setLocalAIInferring(false);
+    setLocalAIStatus("idle");
+    setStatus("");
+
+    setThreads((prev) => {
+      const updated = prev.map((t) => {
+        if (t.id !== activeThreadId) return t;
+        const updatedMessages = t.messages.map((m) => {
+          if (m.role === "assistant" && m.status === "streaming") {
+            return { ...m, status: "done", text: m.text && m.text.length > 0 ? m.text : "(Generation paused)" };
+          }
+          return m;
+        });
+        return { ...t, messages: updatedMessages };
+      });
+      try {
+        const storage = storageMode === "local" ? window.localStorage : window.sessionStorage;
+        storage.setItem("stillpoint:threads", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, [activeThreadId, localAIInferring, storageMode]);
 
   // Local AI actions
   const startDownload = useCallback(async (tier) => {
@@ -452,7 +484,8 @@ export function useStillpoint() {
         setAuthRequiredOpen,
         setAuthRequiredMode,
         user,
-        updateAssistantMsg
+        updateAssistantMsg,
+        abortControllerRef
       );
     },
     [activeThreadId, threads, selectedTier, localAIInferring, isGenerating, user, storageMode]
@@ -489,6 +522,7 @@ export function useStillpoint() {
     },
     actions: {
       submit,
+      stopGeneration,
       enableLocalAI,
       disableLocalAI,
       setSelectedTier,
@@ -585,9 +619,12 @@ async function runCloudPipeline(
   setAuthRequiredOpen,
   setAuthRequiredMode,
   user,
-  updateAssistantMsg
+  updateAssistantMsg,
+  abortControllerRef
 ) {
   setStatus("Connecting to Gemini…");
+  const controller = new AbortController();
+  if (abortControllerRef) abortControllerRef.current = controller;
 
   let tokenQueue = null;
 
@@ -596,6 +633,7 @@ async function runCloudPipeline(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: trimmed, history }),
+      signal: controller.signal,
     });
 
     if (res.status === 401) {
@@ -700,6 +738,11 @@ async function runCloudPipeline(
 
     tokenQueue.finish();
   } catch (err) {
+    if (err && err.name === "AbortError") {
+      if (tokenQueue) tokenQueue.cancel();
+      setStatus("");
+      return;
+    }
     if (tokenQueue) tokenQueue.cancel();
     const errMsg = "Network error. Check your connection and try again.";
     setError(errMsg);
