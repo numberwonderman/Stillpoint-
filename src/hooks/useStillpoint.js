@@ -73,6 +73,9 @@ export function useStillpoint() {
   // Storage mode preference: "session" (default, cleared on tab close) | "local" (persisted on device)
   const [storageMode, setStorageModeState] = useState("session");
 
+  // Toast message shown when migrating storage
+  const [storageMigrationToast, setStorageMigrationToast] = useState(null);
+
   // Helper to update threads in state and active storage engine
   const persistThreads = useCallback((updatedThreads, targetMode = storageMode) => {
     setThreads(updatedThreads);
@@ -84,26 +87,40 @@ export function useStillpoint() {
     }
   }, [storageMode]);
 
-  // Switch storage mode: transfers threads from current storage engine to target storage engine
+  // Switch storage mode: migrates only the active thread to the new storage engine.
+  // Other threads stay in the old engine; they'll migrate when selected.
   const setStorageMode = useCallback((newMode) => {
     if (newMode !== "session" && newMode !== "local") return;
     setStorageModeState(newMode);
     try {
       window.localStorage.setItem("stillpoint:storageMode", newMode);
       const targetStorage = newMode === "local" ? window.localStorage : window.sessionStorage;
-      const oldStorage = newMode === "local" ? window.sessionStorage : window.localStorage;
 
-      // Transfer current threads and active ID to target storage
-      targetStorage.setItem("stillpoint:threads", JSON.stringify(threads));
-      if (activeThreadId) {
+      // Only migrate the active thread
+      const activeThread = threads.find((t) => t.id === activeThreadId) || null;
+      const activeTitle = activeThread?.title || "current chat";
+
+      if (activeThread) {
+        // Write just this thread (or keep existing target threads + swap active)
+        let existingTarget = [];
+        try {
+          const raw = targetStorage.getItem("stillpoint:threads");
+          if (raw) existingTarget = JSON.parse(raw) || [];
+        } catch {}
+        const merged = [
+          activeThread,
+          ...existingTarget.filter((t) => t.id !== activeThread.id),
+        ];
+        targetStorage.setItem("stillpoint:threads", JSON.stringify(merged));
         targetStorage.setItem("stillpoint:activeThreadId", activeThreadId);
+        setStorageMigrationToast(
+          newMode === "local"
+            ? `"${activeTitle}" moved to Local Storage — survives restarts.`
+            : `"${activeTitle}" moved to Session Storage — cleared on tab close.`
+        );
       } else {
         targetStorage.removeItem("stillpoint:activeThreadId");
       }
-
-      // Clear from old storage engine
-      oldStorage.removeItem("stillpoint:threads");
-      oldStorage.removeItem("stillpoint:activeThreadId");
     } catch {
       /* storage error */
     }
@@ -249,6 +266,7 @@ export function useStillpoint() {
     }
     if (localAIInferring || useLocalAIRef.current) {
       abortLocalAIInfight();
+      cancelLocalAIDownload();
     }
     setLocalAIInferring(false);
     setLocalAIStatus("idle");
@@ -343,8 +361,9 @@ export function useStillpoint() {
 
   const isGenerating =
     localAIInferring ||
+    localAIStatus !== "idle" ||
     messages.some((m) => m.role === "assistant" && m.status === "streaming") ||
-    (status !== "" && !error && !status.includes("Downloading") && !status.includes("Loading"));
+    (status !== "" && !error);
 
   const submit = useCallback(
     async (rawText) => {
@@ -519,6 +538,7 @@ export function useStillpoint() {
       activeThreadId,
       messages,
       storageMode,
+      storageMigrationToast,
     },
     actions: {
       submit,
@@ -539,6 +559,7 @@ export function useStillpoint() {
         setAuthRequiredOpen(false);
         setAuthRequiredMode("anonymous");
       },
+      dismissStorageToast: () => setStorageMigrationToast(null),
     },
   };
 }
