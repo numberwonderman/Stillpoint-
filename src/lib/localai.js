@@ -196,9 +196,12 @@ export function cancelLocalAIDownload() {
       activeDownload.cancelState.cancelled = true;
     }
   }
+  if (engineType === "webgpu" && engine && typeof engine.interruptGenerate === "function") {
+    try {
+      engine.interruptGenerate();
+    } catch {}
+  }
   // Signal the worker to abort whatever it is doing — init or generate.
-  // The worker checks the cancel flag inside its token-stream callback,
-  // so the next chunk is the last one to reach the main thread.
   try {
     if (worker) {
       const id = nextMessageId++;

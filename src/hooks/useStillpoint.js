@@ -831,7 +831,16 @@ async function runLocalAIPipeline(
     }));
     setStatus("");
   } catch (err) {
-    setDownloadState(err?.message === "cancelled" ? "cancelled" : "error");
+    if (err?.message === "cancelled" || err?.code === "cancelled") {
+      setStatus("");
+      updateAssistantMsg((msg) => ({
+        ...msg,
+        status: "done",
+        text: msg.text && msg.text.trim().length > 0 ? msg.text : "(Generation paused)",
+      }));
+      return;
+    }
+    setDownloadState("error");
     const errMsg = err.message || "Local AI mode failed. Switch to Cloud and try again.";
     setError(errMsg);
     updateAssistantMsg((msg) => ({ ...msg, status: "done", text: errMsg }));

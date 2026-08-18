@@ -119,11 +119,7 @@ export class WasmEngine {
    * Tokens are streamed back to the main thread via `onToken(chunk)`.
    */
   async generate(messages, options, onToken) {
-    if (this.cancelled) {
-      const err = new Error("cancelled");
-      err.code = "cancelled";
-      throw err;
-    }
+    this.cancelled = false;
     if (!this.pipelineInstance) {
       throw new Error("Local AI engine not initialized. Call initLocalAI() first.");
     }
