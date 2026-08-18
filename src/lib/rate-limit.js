@@ -5,7 +5,7 @@ const redis = Redis.fromEnv();
 
 export const authRateLimit = new Ratelimit({
   redis,
-  limiter: Ratelimit.slidingWindow(5, "60 s"),
+  limiter: Ratelimit.slidingWindow(8, "60 s"),
   analytics: true,
   prefix: "stillpoint:rl:auth",
 });
