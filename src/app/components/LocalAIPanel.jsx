@@ -7,21 +7,6 @@ import ThinkingIndicator from "./ThinkingIndicator";
 
 const TIER_ORDER = ["tiny", "small", "medium", "large"];
 
-/**
- * LocalAIPanel — the "Local AI mode" settings panel.
- *
- * Responsibilities (all client-side, all in this one panel so the
- * download/resume state lives next to the controls that drive it):
- *  - Detect device capability once on mount and recommend a model tier.
- *  - Let the person confirm or override that tier before downloading.
- *  - Show the Privacy modal ("max privacy, quality might suffer") before
- *    the first time Local AI mode is turned on in a session.
- *  - Render a real progress bar for the download, driven by
- *    downloadState/downloadProgress passed down from useStillpoint.
- *  - Offer Cancel / Resume controls — resuming re-calls the same init
- *    path, and the browser's own model cache means already-downloaded
- *    chunks are not re-fetched.
- */
 export default function LocalAIPanel({
   localAISupported,
   enabled,
