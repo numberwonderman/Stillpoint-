@@ -264,3 +264,33 @@ a:hover {
     animation: none;
   }
 }
+
+/* =============================================================
+   Local AI Loading — Indeterminate Progress Bar
+   ============================================================= */
+
+@keyframes indeterminate-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(150%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-indeterminate-bar {
+    animation: indeterminate-bar 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-indeterminate-bar {
+    transform: translateX(0);
+    width: 100%;
+    opacity: 0.5;
+  }
+}
