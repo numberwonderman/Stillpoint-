@@ -4,6 +4,8 @@ import { CrisisPanel } from "./ResponseSection";
 import SpeechPlayer from "./SpeechPlayer";
 import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { useMemo } from "react";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 
 export default function MessageBubble({
@@ -150,6 +152,36 @@ export default function MessageBubble({
                 resume={resume}
                 cancel={cancel}
               />
+            )}
+            {message.resources && message.resources.length > 0 && (
+              <div className="mt-4 space-y-3 animate-fade-in">
+                <h4 className="text-sm font-semibold opacity-80 uppercase tracking-wider text-accent/80">Support Resources</h4>
+                <div className="flex flex-col gap-3">
+                  {message.resources.map((res, i) => (
+                    <Card key={i} className="bg-surface border-accent/20 shadow-sm text-left text-text">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-base font-bold text-accent">{res.name || res.title}</CardTitle>
+                        {(res.purpose || res.description) && (
+                          <CardDescription className="text-text-muted">{res.purpose || res.description}</CardDescription>
+                        )}
+                      </CardHeader>
+                      <CardContent className="py-2 text-sm text-text-muted/90">
+                        {res.availability && <p className="mb-1 text-xs font-medium uppercase text-text-muted/60">Availability</p>}
+                        {res.availability && <p>{res.availability}</p>}
+                      </CardContent>
+                      {(res.url || res.phone || res.actionUrl) && (
+                        <CardFooter className="pt-2">
+                          <Button asChild size="sm" variant="outline" className="w-full border-accent/40 hover:bg-accent hover:text-surface-raised transition-colors">
+                            <a href={res.actionUrl || res.url || `tel:${res.phone}`} target="_blank" rel="noopener noreferrer">
+                              {res.phone && !res.url && !res.actionUrl ? `Call ${res.phone}` : "Visit Resource"}
+                            </a>
+                          </Button>
+                        </CardFooter>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              </div>
             )}
           </>
         )}

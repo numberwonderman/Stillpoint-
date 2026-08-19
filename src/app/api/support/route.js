@@ -6,7 +6,7 @@
  * Flow:
  *   - The session cookie (set by /api/auth/login or /api/auth/signup) is
  *     the gatekeeper: authenticated users may call this route.
- *   - The route enforces a mandatory Crisis Gate first using parser.js.
+ *   - The route enforces a mandatory Crisis Gate first using NOPE API.
  *     If crisis signals are detected, Gemini is never called and crisis
  *     resources are returned immediately.
  *   - If no crisis signals trip, the original message (and recent conversation
@@ -16,9 +16,12 @@
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { GoogleGenAI } from "@google/genai";
+import { google } from "@ai-sdk/google";
+import { streamText, generateObject } from "ai";
+import { z } from "zod";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/auth";
-import { parseInput } from "@/lib/parser";
+import { evaluateSafety, signpostResources } from "@/lib/nope";
+import { SYSTEM_INSTRUCTION } from "@/lib/prompt";
 import {
   aiRateLimit,
   getRateLimitIdentifier,
@@ -28,21 +31,6 @@ import {
 export const runtime = "nodejs";
 
 const MODEL_NAME = "gemini-3.1-flash-lite";
-
-const SYSTEM_INSTRUCTION = `
-You are a supportive, grounding presence for someone who is having a
-difficult emotional moment. You receive their message directly after a safety
-crisis gate check has confirmed they are not in immediate danger.
-
-Rules you must follow:
-- Do not diagnose, label, or speculate about any mental health condition.
-- Do not give medical, clinical, or crisis advice — a separate system already
-  handles crisis situations before you are ever called.
-- Keep your response concise: 2-4 warm, grounded sentences.
-- Be validating, supportive, and empathetic without being clinical or generic.
-- Do not ask intrusive questions; offer thoughtful, present, and compassionate responses.
-- If conversation history is provided, maintain context naturally as a caring conversation partner.
-`.trim();
 
 export async function POST(request) {
   // 1. Auth gate — refuse anything that isn't a logged-in session.
@@ -56,7 +44,7 @@ export async function POST(request) {
     );
   }
 
-  // 1b. Rate-limit after auth, before any Gemini work.
+  // 1b. Rate-limit after auth, before any AI work.
   const limit = await aiRateLimit.limit(getRateLimitIdentifier(request));
   const limited = rateLimitResponse(limit);
   if (limited) return limited;
@@ -84,13 +72,32 @@ export async function POST(request) {
     );
   }
 
-  // 3. Mandatory Crisis Gate — evaluated on every request before calling Gemini.
-  const parsed = parseInput(trimmed);
-  if (parsed.isCrisis) {
+  // 3. NOPE API Safety Gate — evaluated on every request before calling Gemini.
+  // The client also passes a 'useLocalModel' flag if it wants a local fallback.
+  const useLocalModel = body.useLocalModel === true;
+
+  // Run the safety evaluation through NOPE API
+  const safetyEval = await evaluateSafety(trimmed, body.history || []);
+  if (safetyEval.isCrisis) {
     return NextResponse.json(
-      { isCrisis: true, severity: parsed.severity || "elevated" },
+      { 
+        isCrisis: true, 
+        severity: safetyEval.severity || "elevated",
+        resources: safetyEval.matchedResources || []
+      },
       { status: 200 }
     );
+  }
+
+  // If local model is requested, we don't hit the cloud AI.
+  if (useLocalModel) {
+    // For local model fallback without overloading it, we provide a static list of steps
+    // that guide the user on fetching their own resources manually, acknowledging the limitations.
+    return NextResponse.json({
+      localFallback: true,
+      text: "You are currently using Local AI Mode. The cloud conversational model is not active. If you need support resources, please follow these steps:\n\n1. Identify what type of support you are seeking (e.g., counseling, crisis, community).\n2. Visit trusted directories in your region.\n3. Consider contacting a professional directly.",
+      warning: "No cloud model was used. This is a local static fallback."
+    });
   }
 
   // 4. Pull the server-held key.
@@ -102,8 +109,8 @@ export async function POST(request) {
     );
   }
 
-  // 5. Construct conversation contents (history + current message) for Gemini.
-  const contents = [];
+  // 5. Construct conversation messages for Vercel AI SDK.
+  const messages = [];
   if (Array.isArray(body.history)) {
     for (const msg of body.history) {
       if (
@@ -112,112 +119,97 @@ export async function POST(request) {
         msg.text.trim() &&
         (msg.role === "user" || msg.role === "assistant" || msg.role === "model")
       ) {
-        contents.push({
-          role: msg.role === "assistant" ? "model" : "user",
-          parts: [{ text: msg.text.trim() }],
+        messages.push({
+          role: (msg.role === "assistant" || msg.role === "model") ? "assistant" : "user",
+          content: msg.text.trim(),
         });
       }
     }
   }
 
-  contents.push({
+  messages.push({
     role: "user",
-    parts: [{ text: trimmed }],
+    content: trimmed,
   });
 
-  // 6. Call Gemini via streaming API.
-  const ai = new GoogleGenAI({ apiKey });
-  const geminiRequest = {
-    model: MODEL_NAME,
-    contents,
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      temperature: 0.7,
-      maxOutputTokens: 200,
-    },
-  };
-
-  let responseStream;
   try {
-    responseStream = await ai.models.generateContentStream(geminiRequest);
-  } catch (err) {
-    if (err && err.status === 429) {
-      await sleep(1500);
-      try {
-        responseStream = await ai.models.generateContentStream(geminiRequest);
-      } catch (retryErr) {
-        return NextResponse.json(
-          { error: mapGeminiError(retryErr) },
-          { status: 502 }
-        );
-      }
-    } else {
-      return NextResponse.json({ error: mapGeminiError(err) }, { status: 502 });
-    }
-  }
-
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const chunk of responseStream) {
-          const textChunk = chunk.text;
-          if (textChunk) {
+    // Using Vercel AI SDK to stream text
+    const result = streamText({
+      model: google(MODEL_NAME),
+      system: SYSTEM_INSTRUCTION,
+      messages: messages,
+      temperature: 0.7,
+      maxTokens: 200,
+    });
+    
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Stream the text chunks
+          for await (const textChunk of result.textStream) {
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ text: textChunk })}\n\n`)
             );
           }
+          
+          // After text generation, check for signpost resources
+          const rawResources = await signpostResources({ query: trimmed });
+          if (rawResources && rawResources.length > 0) {
+            try {
+              const { object: rankedResult } = await generateObject({
+                model: google(MODEL_NAME),
+                schema: z.object({
+                  rankedResources: z.array(z.object({
+                    name: z.string(),
+                    description: z.string().optional(),
+                    phone: z.string().optional(),
+                    url: z.string().optional(),
+                    actionUrl: z.string().optional(),
+                    availability: z.string().optional()
+                  }))
+                }),
+                prompt: `User message: "${trimmed}"\n\nRaw resources from search:\n${JSON.stringify(rawResources)}\n\nFilter and rank these resources from most relevant to least relevant to the user's situation. Only include resources that are actually helpful for their specific context.`
+              });
+
+              if (rankedResult.rankedResources && rankedResult.rankedResources.length > 0) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ resources: rankedResult.rankedResources })}\n\n`)
+                );
+              }
+            } catch (rankingErr) {
+              console.error("Resource ranking failed", rankingErr);
+              // Fallback to raw resources if ranking fails
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ resources: rawResources })}\n\n`)
+              );
+            }
+          }
+          
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        } catch (err) {
+          console.error("Stream Error:", err);
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ error: "Cloud response failed unexpectedly." })}\n\n`)
+          );
+        } finally {
+          controller.close();
         }
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      } catch (err) {
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ error: mapGeminiError(err) })}\n\n`)
-        );
-      } finally {
-        controller.close();
       }
-    },
-  });
+    });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function mapGeminiError(err) {
-  const status = err && typeof err.status === "number" ? err.status : undefined;
-
-  if (status === 400 || status === 401 || status === 403) {
-    return "Cloud responses are temporarily unavailable. Please try again shortly.";
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+      },
+    });
+  } catch (err) {
+    console.error("AI Generation Error", err);
+    return NextResponse.json(
+      { error: "Cloud response failed unexpectedly. Please try again." }, 
+      { status: 502 }
+    );
   }
-  if (status === 429) {
-    return "Rate limit reached. Please wait a moment and try again.";
-  }
-  if (typeof status === "number") {
-    return `Gemini request failed (status ${status}).`;
-  }
-
-  const msg = err && typeof err.message === "string" ? err.message.toLowerCase() : "";
-  if (
-    msg.includes("fetch failed") ||
-    msg.includes("network") ||
-    msg.includes("enotfound") ||
-    msg.includes("econnrefused")
-  ) {
-    return "Network error contacting Gemini. Check your connection and try again.";
-  }
-
-  return "Cloud response failed unexpectedly. Please try again.";
 }

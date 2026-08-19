@@ -751,6 +751,12 @@ async function runCloudPipeline(
           if (parsedData.text) {
             tokenQueue.append(parsedData.text);
           }
+          if (parsedData.resources) {
+            updateAssistantMsg((msg) => ({
+              ...msg,
+              resources: parsedData.resources
+            }));
+          }
         } catch {
           // ignore malformed frame
         }
@@ -795,79 +801,12 @@ async function runLocalAIPipeline(
     return;
   }
 
-  const gate = parseInput(trimmed);
-  if (gate.isCrisis) {
-    abortLocalAIInfight();
-    setLocalAIInferring(false);
-    setLocalAIStatus("idle");
-    updateAssistantMsg((msg) => ({
-      ...msg,
-      status: "done",
-      crisis: true,
-      crisisSeverity: gate.severity || "elevated",
-      localAIStopped: true,
-    }));
-    setStatus("");
-    setError("");
-    return;
-  }
-
-  try {
-    if (!isLocalAIReady() || getReadyModelKey() !== tier) {
-      setLocalAIStatus("preparing");
-      setStatus("Initializing on-device model in a background worker…");
-      setDownloadState("downloading");
-      await initLocalAI(
-        (report) => {
-          const pct = Math.round((report.progress || 0) * 100);
-          setDownloadProgress(report.progress || 0);
-          setDownloadText(report.text || "");
-          if (report.progress && report.progress > 0) {
-            setLocalAIStatus("downloading");
-            setStatus(`Loading on-device model… ${pct}%`);
-          }
-        },
-        { tier }
-      );
-      setDownloadState("ready");
-      setDownloadProgress(1);
-      setLocalAIStatus("idle");
-    }
-
-    setLocalAIStatus("thinking");
-    setLocalAIInferring(true);
-    setStatus("Thinking on-device…");
-
-    const text = await generateLocal(trimmed, (chunk) => {
-      updateAssistantMsg((msg) => ({
-        ...msg,
-        text: (msg.text || "") + chunk,
-      }));
-    });
-
-    updateAssistantMsg((msg) => ({
-      ...msg,
-      status: "done",
-      text: msg.text && msg.text.length > 0 ? msg.text : text || "",
-    }));
-    setStatus("");
-  } catch (err) {
-    if (err?.message === "cancelled" || err?.code === "cancelled") {
-      setStatus("");
-      updateAssistantMsg((msg) => ({
-        ...msg,
-        status: "done",
-        text: msg.text && msg.text.trim().length > 0 ? msg.text : "(Generation paused)",
-      }));
-      return;
-    }
-    setDownloadState("error");
-    const errMsg = err.message || "Local AI mode failed. Switch to Cloud and try again.";
-    setError(errMsg);
-    updateAssistantMsg((msg) => ({ ...msg, status: "done", text: errMsg }));
-    setStatus("");
-  } finally {
-    setLocalAIStatus("idle");
-    setLocalAIInferring(false);
-  }
+  // Provide a static fallback with a warning label and a list of steps instead of heavy inference.
+  updateAssistantMsg((msg) => ({
+    ...msg,
+    status: "done",
+    text: "⚠️ **Warning: No cloud model was used.** You are in Local Privacy Mode.\n\nSince local inference can be heavy, we currently provide this static guide to finding support:\n\n1. **Identify Need:** Consider if you need immediate crisis support or ongoing counseling.\n2. **Search Locally:** Look up community health resources in your region.\n3. **Reach Out:** Contact a professional or a trusted individual.\n\n*If you wish to use the conversational listener, please switch to Cloud Mode in settings.*"
+  }));
+  
+  setStatus("");
 }
