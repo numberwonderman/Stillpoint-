@@ -17,21 +17,19 @@ Stillpoint has two response paths, and they handle your words differently
 on purpose.
 
 **Cloud path** — your typed text is sent to `/api/support` on the server.
-After passing through a mandatory **Crisis Gate**, the original message (and
-recent conversation turns maintained in browser `sessionStorage`) is sent
-directly to Gemini. The Gemini API key lives only on the server; messages are
-never logged or stored in any database. Responses stream back token-by-token
-to the UI.
+First, it passes through the **NOPE Safety API** (`/v1/evaluate`) which acts as a mandatory Crisis Gate. If a crisis is detected, the API immediately halts AI processing and surfaces verified crisis resources.
+If no crisis is found, the message is passed to Google's Gemini models via the **Vercel AI SDK** (`streamText`). While the response streams back token-by-token, a parallel background process uses the free **NOPE Smart Search API** to fetch relevant mental health resources, and then uses a secondary Gemini structured output call to filter and rank those resources based on your exact context. The ranked resources are appended to the end of the chat stream as interactive UI cards.
+
+The Gemini API key lives only on the server; messages are never logged or stored in any database.
 
 **Local AI path** — if you've turned on Local AI mode, your typed text
 stays on your device. It is fed directly to an on-device model that runs in
 your browser (WebGPU when available, otherwise WebAssembly in a Web Worker).
-The server is never contacted on this path. You choose the model tier
-(small / medium / large) from the composer bar or the model settings modal.
+The server is never contacted on this path. Because local generation can be resource-intensive, we also provide a lightweight static fallback that guides users on how to manually find resources while keeping their data completely private.
 
 ```
                   ┌──────────────────────────────────┐
-                  │   client-side crisis gate (1st)  │
+                  │    NOPE Safety API Crisis Gate   │
                   └───────────────┬──────────────────┘
                                   │ if not crisis
               ┌───────────────────┴───────────────────┐
@@ -40,25 +38,23 @@ The server is never contacted on this path. You choose the model tier
               │                                       │
               ▼                                       ▼
      raw text to on-device           raw text → /api/support
-     model in browser                → server crisis gate
-     (no network call)               → direct message to Gemini
-              │                        (session storage context)
-              ▼                                       │
-     streamed response                        ▼
-     in the UI                       token stream → UI
+     model in browser                → Vercel AI SDK streamText
+     (no network call)               → Gemini ranking of NOPE resources
+              │                                       │
+              ▼                                       ▼
+     streamed response                        token stream → UI
+     in the UI                                (Cards append at end)
 ```
 
-The client also runs the same crisis gate first, before either
+The client also runs a lightweight crisis gate first, before either
 path is taken. If the gate fires — for language associated with suicidal
 ideation or self-harm — Stillpoint **never calls Gemini and never talks
 to the local model**. Instead it immediately shows a crisis panel with
-immediate-support resources (US: 988, Crisis Text Line, 911, The Trevor
-Project, Veterans Crisis Line; international: findahelpline.com), what
+immediate-support resources (US: 988, Crisis Text Line, 911; international: findahelpline.com), what
 to expect when calling, and a "copy these resources" button. If a local
 generation was in flight, it is aborted so the panel doesn't appear next
 to a half-finished AI reply. This check happens in the browser and does
-not depend on having an API key configured, a session cookie, or a
-working network connection. The server runs the same gate independently
+not depend on having an API key configured. The server runs the robust NOPE API gate independently
 as a second line of defense.
 
 ## Why this design
@@ -67,7 +63,9 @@ Stillpoint protects user privacy through ephemeral data retention: conversation
 context is kept only in the browser (`sessionStorage` by default, or
 `localStorage` if you opt in) and is never persisted to any database. On the
 cloud path, messages are decoupled from user identity and protected by a
-mandatory Crisis Gate. On the Local AI path, nothing leaves your device at all.
+mandatory Crisis Gate powered by the NOPE API. On the Local AI path, nothing leaves your device at all.
+
+> **See how StillPoint compares to generic AI assistants:** Check out our [Comparison Dataset](docs/comparison_dataset.md) to understand why our "listening over solving" architecture outperforms generic solutions.
 
 ## Features
 
@@ -95,8 +93,8 @@ mandatory Crisis Gate. On the Local AI path, nothing leaves your device at all.
   finalized phrases are appended at the cursor.
 - **Text-to-speech (TTS)** — assistant messages can be read aloud via the browser
   speech synthesis API, with adjustable speed settings.
-- **Crisis gate** — a dedicated, always-first check for crisis language that
-  bypasses the AI entirely and shows hardcoded support resources.
+- **Crisis gate (NOPE API)** — a robust safety check that evaluates the text via NOPE before passing anything to Gemini, intercepting critical moments to provide real help.
+- **AI-Ranked Resources** — integrated with the free NOPE smart search API, the system fetches location-specific support resources, and Gemini dynamically ranks and filters them based on the user's specific context.
 - **Auth-gated cloud mode** — signing in (or signing up) is required for the
   cloud path. Anonymous users see a non-blocking modal that offers Local AI as
   an alternative. Session expiry is detected and surfaces a gentle re-auth
@@ -113,8 +111,7 @@ mandatory Crisis Gate. On the Local AI path, nothing leaves your device at all.
   Next](https://brailleinstitute.org/freefont), a typeface designed by the
   Braille Institute for low-vision readability. High-contrast dark palette,
   large touch targets, full keyboard navigation, visible focus states, and
-  `prefers-reduced-motion` support throughout. Smooth scrollbar, modal
-  pop-in animations, and drawer slide-in micro-animations.
+  `prefers-reduced-motion` support throughout. Integrates **shadcn/ui** components for accessible resource cards and polished interactions.
 
 ## Project structure
 
@@ -167,7 +164,8 @@ src/
     lexicon.js                 Pure data: emotion words, crisis terms
     localai.js                 WebLLM / WASM on-device backend + MODEL_CATALOG
     mongodb.js                 Mongoose connection helper
-    parser.js                  Rule-based text → structured summary
+    nope.js                    NOPE API integration for evaluate & signpost
+    prompt.js                  Shared system prompt unifying model behavior
     rate-limit.js              Upstash Redis rate-limit factory
     workers/
       localaiWorker.js         Web Worker entry for WASM path
@@ -182,15 +180,15 @@ jsconfig.json
 
 Where raw text goes:
 - **Cloud path** — `useStillpoint.js` POSTs raw text + conversation history to
-  `app/api/support/route.js`. The server runs `parser.js`, forwards a structured
-  summary to Gemini, and streams the response back as SSE. Raw text is held only
-  for the request's duration; never logged, never persisted.
-- **Local AI path** — `useStillpoint.js` feeds the raw text directly to
+  `app/api/support/route.js`. The server queries the `NOPE API` for a safety check. 
+  If safe, it forwards the context to Gemini via Vercel AI SDK, fetches and ranks resources, 
+  and streams the response back as SSE. Raw text is held only for the request's duration; 
+  never logged, never persisted.
+- **Local AI path** — `useStillpoint.js` runs a static fallback or feeds the raw text directly to
   `lib/localai.js`, which runs the model on-device via WebLLM or WASM. Nothing
   leaves the browser on this path.
-- **Crisis gate** — runs in the browser before either branch, and again
-  on the server for the cloud path. A crisis hit stops both paths and renders
-  the crisis resource panel immediately.
+- **Crisis gate** — runs via NOPE API on the server. A crisis hit stops the AI path and renders
+  ranked crisis resources immediately.
 
 ## Getting started
 
@@ -200,6 +198,7 @@ Where raw text goes:
    - `GEMINI_API_KEY` — held only on the server; never reaches the browser.
    - `MONGODB_URI` — MongoDB connection string for user accounts.
    - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` — for API rate limiting.
+   - `NOPE_BASE_URL` and `NOPE_API_KEY` — for NOPE Safety API integrations.
 3. Start the dev server: `pnpm dev`, then open `http://localhost:3000`.
 4. Sign in (or create an account) from the app. The cloud path requires
    a session; the Local AI path works without one.

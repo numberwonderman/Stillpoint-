@@ -16,7 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText, generateObject } from "ai";
 import { z } from "zod";
 import { AUTH_COOKIE_NAME, verifyAuthToken } from "@/lib/auth";
@@ -109,6 +109,9 @@ export async function POST(request) {
     );
   }
 
+  // Instantiate Google provider with the explicit key (avoids requiring GOOGLE_GENERATIVE_AI_API_KEY).
+  const google = createGoogleGenerativeAI({ apiKey });
+
   // 5. Construct conversation messages for Vercel AI SDK.
   const messages = [];
   if (Array.isArray(body.history)) {
@@ -154,11 +157,11 @@ export async function POST(request) {
           }
           
           // After text generation, check for signpost resources
-          const rawResources = await signpostResources({ query: trimmed });
+          const rawResources = await signpostResources({ query: trimmed, country: "US" });
           if (rawResources && rawResources.length > 0) {
             try {
               const { object: rankedResult } = await generateObject({
-                model: google(MODEL_NAME),
+                model: google(MODEL_NAME), // uses the same keyed instance
                 schema: z.object({
                   rankedResources: z.array(z.object({
                     name: z.string(),

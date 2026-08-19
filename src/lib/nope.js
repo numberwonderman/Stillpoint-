@@ -20,7 +20,7 @@ export async function evaluateSafety(message, history = []) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${NOPE_API_KEY}`,
       },
-      body: JSON.stringify({ message, history }),
+      body: JSON.stringify({ text: message, messages: history }),
     });
     
     if (!res.ok) {
@@ -42,10 +42,11 @@ export async function evaluateSafety(message, history = []) {
   }
 }
 
-export async function signpostResources({ query = "" } = {}) {
+export async function signpostResources({ query = "", country = "US" } = {}) {
   try {
     const params = new URLSearchParams();
     if (query) params.append("q", query);
+    params.append("country", country);
 
     // Using the free, public sandbox endpoint which returns AI-ranked search results
     const res = await fetch(`${NOPE_BASE_URL}/v1/try/signpost/smart?${params.toString()}`, {

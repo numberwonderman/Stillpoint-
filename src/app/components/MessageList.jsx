@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useState } from "react";
 import MessageBubble from "./MessageBubble";
 import ThinkingIndicator from "./ThinkingIndicator";
+import QuestionPrompt, { extractQuestion } from "./QuestionPrompt";
 
 /**
  * MessageList — scrollable message stream container.
@@ -19,11 +20,14 @@ export default function MessageList({
   downloadText,
   crisisRegion,
   onChooseCrisisRegion,
+  onReply,
 }) {
   const containerRef = useRef(null);
   const bottomRef = useRef(null);
   const prevCountRef = useRef(0);
   const prevLastIdRef = useRef(null);
+  // Track dismissed question IDs so the prompt doesn't reappear on re-render
+  const [dismissedIds, setDismissedIds] = useState(() => new Set());
 
   // Only scroll to bottom when a genuinely new message arrives,
   // or when the last assistant message content grows (streaming).
@@ -66,6 +70,18 @@ export default function MessageList({
     if (localAIStatus === "disposing") return "Unloading model…";
     return null;
   })();
+
+  // Find the last done assistant message that contains a question
+  const isStreaming = messages?.some((m) => m.role === "assistant" && m.status === "streaming");
+  const lastDoneAssistant = !isStreaming
+    ? [...(messages || [])].reverse().find(
+        (m) => m.role === "assistant" && m.status === "done" && m.text && !m.crisis
+      )
+    : null;
+  const activeQuestion =
+    lastDoneAssistant && !dismissedIds.has(lastDoneAssistant.id)
+      ? extractQuestion(lastDoneAssistant.text)
+      : null;
 
   if (!messages || messages.length === 0) {
     return (
@@ -110,6 +126,23 @@ export default function MessageList({
             onChooseCrisisRegion={onChooseCrisisRegion}
           />
         ))}
+
+        {/* Question prompt — slides in after last AI message when it asks something */}
+        {activeQuestion && (
+          <div className="flex justify-start w-full px-0 pb-1">
+            <QuestionPrompt
+              key={lastDoneAssistant.id}
+              question={activeQuestion}
+              onReply={(text) => {
+                setDismissedIds((prev) => new Set(prev).add(lastDoneAssistant.id));
+                onReply?.(text);
+              }}
+              onDismiss={() =>
+                setDismissedIds((prev) => new Set(prev).add(lastDoneAssistant.id))
+              }
+            />
+          </div>
+        )}
 
         {/* Global Status / Error Indicator */}
         {(localAILoadingLabel || error || (status && !localAILoadingLabel)) && (
