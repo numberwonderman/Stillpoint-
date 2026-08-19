@@ -2,18 +2,16 @@
 
 import { CrisisPanel } from "./ResponseSection";
 import SpeechPlayer from "./SpeechPlayer";
+import ResourceCard from "./ResourceCard";
 import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { useMemo } from "react";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-
 
 export default function MessageBubble({
   message,
   crisisRegion,
   onChooseCrisisRegion,
 }) {
-  const { role, text, status, crisis, crisisSeverity, localAIStopped } = message;
+  const { role, text, status, crisis, crisisSeverity, localAIStopped, resources } = message;
   const browserLang = typeof navigator !== "undefined" ? navigator.language : "en-US";
 
   // Hooks must run unconditionally for every render — keep them above
@@ -39,7 +37,7 @@ export default function MessageBubble({
   // Mirror the static text into word/separator tokens for highlighting.
   const displayTokens = useMemo(() => {
     if (!speaking) return null;
-    const re = /([A-Za-z0-9'\-]+)|([^A-Za-z0-9'\-]+)/g;
+    const re = /([A-Za-z0-9'\\-]+)|([^A-Za-z0-9'\\-]+)/g;
     const out = [];
     let m;
     while ((m = re.exec(text || "")) !== null) {
@@ -48,8 +46,7 @@ export default function MessageBubble({
     return out;
   }, [text, speaking]);
 
-  // Number of "word" tokens that have already been spoken (i.e. tokens
-  // before wordIndex in the hook's queue). Used to mark past words.
+  // Number of "word" tokens that have already been spoken.
   const spokenWordCount = useMemo(() => {
     if (!speaking || wordIndex < 0) return 0;
     return wordIndex + 1;
@@ -79,7 +76,7 @@ export default function MessageBubble({
     );
   }
 
-  // Assistant bubble with Crisis Panel
+  // Assistant bubble with Crisis Panel (full crisis state)
   if (crisis) {
     return (
       <div className="mb-6 flex justify-start w-full min-w-0">
@@ -98,6 +95,7 @@ export default function MessageBubble({
   // Normal / Streaming Assistant bubble
   const isStreaming = status === "streaming";
   const isEmpty = !text || text.length === 0;
+  const hasResources = Array.isArray(resources) && resources.length > 0;
 
   return (
     <div className="mb-4 flex justify-start w-full animate-bubble-appear">
@@ -116,7 +114,7 @@ export default function MessageBubble({
               <span className="thinking-dot h-2 w-2 rounded-full bg-accent" style={{ animationDelay: "400ms" }} />
             </div>
             <span className="text-xs font-medium tracking-wide opacity-85 animate-pulse">
-              Gemini is writing…
+              Stillpoint is thinking…
             </span>
           </div>
         ) : (
@@ -133,6 +131,7 @@ export default function MessageBubble({
                 {isStreaming && <span aria-hidden="true" className="streaming-caret" />}
               </p>
             )}
+
             {!isStreaming && (
               <SpeechPlayer
                 text={text}
@@ -153,32 +152,20 @@ export default function MessageBubble({
                 cancel={cancel}
               />
             )}
-            {message.resources && message.resources.length > 0 && (
-              <div className="mt-4 space-y-3 animate-fade-in">
-                <h4 className="text-sm font-semibold opacity-80 uppercase tracking-wider text-accent/80">Support Resources</h4>
-                <div className="flex flex-col gap-3">
-                  {message.resources.map((res, i) => (
-                    <Card key={i} className="bg-surface border-accent/20 shadow-sm text-left text-text">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base font-bold text-accent">{res.name || res.title}</CardTitle>
-                        {(res.purpose || res.description) && (
-                          <CardDescription className="text-text-muted">{res.purpose || res.description}</CardDescription>
-                        )}
-                      </CardHeader>
-                      <CardContent className="py-2 text-sm text-text-muted/90">
-                        {res.availability && <p className="mb-1 text-xs font-medium uppercase text-text-muted/60">Availability</p>}
-                        {res.availability && <p>{res.availability}</p>}
-                      </CardContent>
-                      {(res.url || res.phone || res.actionUrl) && (
-                        <CardFooter className="pt-2">
-                          <Button asChild size="sm" variant="outline" className="w-full border-accent/40 hover:bg-accent hover:text-surface-raised transition-colors">
-                            <a href={res.actionUrl || res.url || `tel:${res.phone}`} target="_blank" rel="noopener noreferrer">
-                              {res.phone && !res.url && !res.actionUrl ? `Call ${res.phone}` : "Visit Resource"}
-                            </a>
-                          </Button>
-                        </CardFooter>
-                      )}
-                    </Card>
+
+            {/* Resource cards — shown after response is done */}
+            {hasResources && !isStreaming && (
+              <div className="mt-5 pt-4 border-t border-border/30 space-y-2.5 animate-resources-appear">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-px flex-1 bg-border/40" />
+                  <span className="text-[0.75rem] font-bold uppercase tracking-[0.15em] text-text-muted/60 shrink-0">
+                    Support resources
+                  </span>
+                  <div className="h-px flex-1 bg-border/40" />
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  {resources.map((res, i) => (
+                    <ResourceCard key={i} resource={res} />
                   ))}
                 </div>
               </div>

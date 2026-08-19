@@ -73,6 +73,8 @@ function deriveChips(question) {
 export default function QuestionPrompt({ question, onReply, onDismiss }) {
   const [dismissed, setDismissed] = useState(false);
   const [visible, setVisible] = useState(true);
+  const [customText, setCustomText] = useState("");
+  const [inputFocused, setInputFocused] = useState(false);
 
   const chips = deriveChips(question);
 
@@ -84,17 +86,35 @@ export default function QuestionPrompt({ question, onReply, onDismiss }) {
     }, 280);
   }, [onDismiss]);
 
-  const handleChip = useCallback(
-    (chip) => {
-      // Immediately send the chip text as the reply
-      onReply?.(chip);
+  const handleReply = useCallback(
+    (text) => {
+      if (!text.trim()) return;
+      onReply?.(text.trim());
       setVisible(false);
       setTimeout(() => setDismissed(true), 280);
     },
     [onReply]
   );
 
+  const handleChip = useCallback((chip) => handleReply(chip), [handleReply]);
+
+  const handleCustomSubmit = useCallback(() => {
+    handleReply(customText);
+  }, [customText, handleReply]);
+
+  const handleKeyDown = useCallback(
+    (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleCustomSubmit();
+      }
+    },
+    [handleCustomSubmit]
+  );
+
   if (dismissed) return null;
+
+  const canSend = customText.trim().length > 0;
 
   return (
     <div
@@ -120,12 +140,12 @@ export default function QuestionPrompt({ question, onReply, onDismiss }) {
           width: "100%",
         }}
       >
-        {/* Top row: icon + label + close */}
+        {/* Top row: pulse dot + question text + close */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", marginBottom: "10px" }}>
           {/* Pulse dot */}
           <div
             style={{
-              marginTop: "2px",
+              marginTop: "4px",
               flexShrink: 0,
               width: "8px",
               height: "8px",
@@ -194,28 +214,122 @@ export default function QuestionPrompt({ question, onReply, onDismiss }) {
         <div
           role="group"
           aria-label="Quick reply options"
-          style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+          style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "12px" }}
         >
           {chips.map((chip, i) => (
             <QuickReplyChip key={i} label={chip} onClick={() => handleChip(chip)} delay={i * 45} />
           ))}
         </div>
 
+        {/* Custom reply input */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: "8px",
+            borderRadius: "12px",
+            border: inputFocused
+              ? "1px solid rgba(111,191,174,0.55)"
+              : "1px solid rgba(111,191,174,0.18)",
+            background: inputFocused
+              ? "rgba(111,191,174,0.06)"
+              : "rgba(255,255,255,0.03)",
+            padding: "8px 8px 8px 12px",
+            transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
+            boxShadow: inputFocused
+              ? "0 0 0 3px rgba(111,191,174,0.1)"
+              : "none",
+          }}
+        >
+          <textarea
+            rows={1}
+            value={customText}
+            onChange={(e) => {
+              setCustomText(e.target.value);
+              // Auto-grow up to ~4 rows
+              e.target.style.height = "auto";
+              e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
+            }}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            placeholder="Or write your own reply…"
+            aria-label="Type a custom reply"
+            style={{
+              flex: 1,
+              resize: "none",
+              background: "none",
+              border: "none",
+              outline: "none",
+              color: "var(--color-text)",
+              fontSize: "0.8375rem",
+              lineHeight: 1.5,
+              fontFamily: "inherit",
+              minHeight: "22px",
+              maxHeight: "96px",
+              overflowY: "auto",
+              padding: 0,
+            }}
+          />
+
+          {/* Send button */}
+          <button
+            type="button"
+            onClick={handleCustomSubmit}
+            disabled={!canSend}
+            aria-label="Send custom reply"
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "30px",
+              height: "30px",
+              borderRadius: "8px",
+              border: "none",
+              cursor: canSend ? "pointer" : "default",
+              background: canSend
+                ? "var(--color-accent)"
+                : "rgba(111,191,174,0.12)",
+              color: canSend ? "var(--color-bg)" : "rgba(111,191,174,0.35)",
+              transition: "background 0.18s, transform 0.14s, color 0.18s",
+              transform: canSend ? "scale(1)" : "scale(0.92)",
+            }}
+            onMouseEnter={(e) => {
+              if (canSend) e.currentTarget.style.background = "var(--color-accent-strong)";
+            }}
+            onMouseLeave={(e) => {
+              if (canSend) e.currentTarget.style.background = "var(--color-accent)";
+            }}
+          >
+            {/* Arrow-up send icon */}
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path
+                d="M7 12V3M7 3L3 7M7 3l4 4"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+
         {/* Footer hint */}
         <p
           style={{
-            margin: "10px 0 0",
-            fontSize: "0.72rem",
+            margin: "8px 0 0",
+            fontSize: "0.71rem",
             color: "var(--color-text-muted)",
-            opacity: 0.7,
+            opacity: 0.65,
             lineHeight: 1.4,
           }}
         >
-          Tap a reply or type your own · You can always close this
+          Enter to send · Shift+Enter for new line · Close to skip
         </p>
       </div>
 
-      {/* Keyframe styles injected once */}
+      {/* Keyframe styles */}
       <style>{`
         @keyframes question-pulse {
           0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(111,191,174,0.6); }

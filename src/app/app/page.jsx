@@ -102,6 +102,7 @@ export default function AppPage() {
         onEnableLocalAI={actions.enableLocalAI}
         onDisableLocalAI={actions.disableLocalAI}
         onSelectTier={actions.setSelectedTier}
+        onStartDownload={actions.startDownload}
       />
 
       {/* Centered Backdrop-Blurred Model Selection Modal */}

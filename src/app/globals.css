@@ -219,6 +219,21 @@ a:hover {
   animation: bubble-appear 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes resources-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-resources-appear {
+  animation: resources-appear 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 @keyframes streaming-glow {
   0%, 100% {
     border-color: rgba(111, 191, 174, 0.35);
@@ -260,6 +275,7 @@ a:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-bubble-appear,
+  .animate-resources-appear,
   .streaming-bubble,
   .streaming-caret,
   .animate-backdrop-fade,

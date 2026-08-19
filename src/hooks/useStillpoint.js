@@ -147,6 +147,18 @@ export function useStillpoint() {
       const activeMode = savedMode === "local" ? "local" : "session";
       setStorageModeState(activeMode);
 
+      const savedLocalAI = window.localStorage.getItem("stillpoint:localAIEnabled");
+      if (savedLocalAI !== null) {
+        const isEnabled = savedLocalAI === "true";
+        setLocalAIEnabled(isEnabled);
+        useLocalAIRef.current = isEnabled;
+      }
+
+      const savedTier = window.localStorage.getItem("stillpoint:selectedTier");
+      if (savedTier) {
+        setSelectedTier(savedTier);
+      }
+
       const targetStorage = activeMode === "local" ? window.localStorage : window.sessionStorage;
       const savedThreads = targetStorage.getItem("stillpoint:threads");
       const savedActiveId = targetStorage.getItem("stillpoint:activeThreadId");
@@ -332,11 +344,13 @@ export function useStillpoint() {
   const enableLocalAI = useCallback(() => {
     useLocalAIRef.current = true;
     setLocalAIEnabled(true);
+    try { window.localStorage.setItem("stillpoint:localAIEnabled", "true"); } catch {}
   }, []);
 
   const disableLocalAI = useCallback(() => {
     useLocalAIRef.current = false;
     setLocalAIEnabled(false);
+    try { window.localStorage.setItem("stillpoint:localAIEnabled", "false"); } catch {}
     setLocalAIStatus("disposing");
     unloadLocalAI()
       .catch(() => {})
@@ -346,6 +360,11 @@ export function useStillpoint() {
     setDownloadState("idle");
     setDownloadProgress(0);
     setDownloadText("");
+  }, []);
+
+  const handleSetSelectedTier = useCallback((tier) => {
+    setSelectedTier(tier);
+    try { window.localStorage.setItem("stillpoint:selectedTier", tier); } catch {}
   }, []);
 
   // Get active thread & messages
@@ -490,7 +509,8 @@ export function useStillpoint() {
           setDownloadText,
           setLocalAIStatus,
           setLocalAIInferring,
-          updateAssistantMsg
+          updateAssistantMsg,
+          startDownload
         );
         return;
       }
@@ -545,7 +565,7 @@ export function useStillpoint() {
       stopGeneration,
       enableLocalAI,
       disableLocalAI,
-      setSelectedTier,
+      setSelectedTier: handleSetSelectedTier,
       startDownload,
       cancelDownload,
       chooseCrisisRegion,
@@ -792,7 +812,8 @@ async function runLocalAIPipeline(
   setDownloadText,
   setLocalAIStatus,
   setLocalAIInferring,
-  updateAssistantMsg
+  updateAssistantMsg,
+  startDownload
 ) {
   if (!isLocalAISupported()) {
     const errMsg = "Local AI mode isn't supported in this browser. Switch to Cloud in Settings.";
@@ -801,12 +822,64 @@ async function runLocalAIPipeline(
     return;
   }
 
-  // Provide a static fallback with a warning label and a list of steps instead of heavy inference.
-  updateAssistantMsg((msg) => ({
-    ...msg,
-    status: "done",
-    text: "⚠️ **Warning: No cloud model was used.** You are in Local Privacy Mode.\n\nSince local inference can be heavy, we currently provide this static guide to finding support:\n\n1. **Identify Need:** Consider if you need immediate crisis support or ongoing counseling.\n2. **Search Locally:** Look up community health resources in your region.\n3. **Reach Out:** Contact a professional or a trusted individual.\n\n*If you wish to use the conversational listener, please switch to Cloud Mode in settings.*"
-  }));
-  
-  setStatus("");
+  if (!isLocalAIReady()) {
+    try {
+      await startDownload(tier);
+    } catch (e) {
+      if (e && e.message === "cancelled") {
+        updateAssistantMsg((msg) => ({ ...msg, status: "done", text: "(Download paused)" }));
+      } else {
+        const errMsg = "Failed to download model. Please try again.";
+        setError(errMsg);
+        updateAssistantMsg((msg) => ({ ...msg, status: "done", text: errMsg }));
+      }
+      return;
+    }
+  }
+
+  setStatus("Thinking locally…");
+  setLocalAIInferring(true);
+  setLocalAIStatus("thinking");
+
+  try {
+    const responseText = await generateLocal(trimmed, (chunk) => {
+      updateAssistantMsg((msg) => ({
+        ...msg,
+        text: (msg.text || "") + chunk,
+      }));
+    });
+
+    if (responseText) {
+      updateAssistantMsg((msg) => ({
+        ...msg,
+        status: "done",
+        text: responseText,
+      }));
+    } else {
+      updateAssistantMsg((msg) => ({
+        ...msg,
+        status: "done",
+      }));
+    }
+  } catch (err) {
+    if (err && err.message === "cancelled") {
+      updateAssistantMsg((msg) => ({
+        ...msg,
+        status: "done",
+        text: msg.text ? msg.text : "(Generation paused)"
+      }));
+    } else {
+      const errMsg = err?.message || "Local generation failed.";
+      setError(errMsg);
+      updateAssistantMsg((msg) => ({
+        ...msg,
+        status: "done",
+        text: msg.text ? msg.text + "\n\n[" + errMsg + "]" : errMsg
+      }));
+    }
+  } finally {
+    setLocalAIInferring(false);
+    setLocalAIStatus("idle");
+    setStatus("");
+  }
 }

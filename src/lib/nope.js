@@ -45,7 +45,7 @@ export async function evaluateSafety(message, history = []) {
 export async function signpostResources({ query = "", country = "US" } = {}) {
   try {
     const params = new URLSearchParams();
-    if (query) params.append("q", query);
+    if (query) params.append("query", query);
     params.append("country", country);
 
     // Using the free, public sandbox endpoint which returns AI-ranked search results
@@ -59,7 +59,8 @@ export async function signpostResources({ query = "", country = "US" } = {}) {
     }
     
     const data = await res.json();
-    return data.resources || data.results || [];
+    const results = data.ranked || data.resources || data.results || [];
+    return results.map(r => r.resource ? { ...r.resource, why: r.why || r.resource.why } : r);
   } catch (err) {
     console.error("Failed to fetch signpost resources", err);
     return [];

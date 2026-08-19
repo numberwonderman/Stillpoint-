@@ -30,6 +30,7 @@ export default function Composer({
   onEnableLocalAI,
   onDisableLocalAI,
   onSelectTier,
+  onStartDownload,
 }) {
   const [text, setText] = useState("");
   const textareaRef = useRef(null);
@@ -260,6 +261,9 @@ export default function Composer({
                         onClick={() => {
                           onEnableLocalAI?.();
                           onSelectTier?.(key);
+                          if (!isDownloaded && onStartDownload) {
+                            onStartDownload(key);
+                          }
                           setShowModelPicker(false);
                         }}
                         className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors ${

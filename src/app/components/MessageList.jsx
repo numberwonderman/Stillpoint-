@@ -36,7 +36,7 @@ export default function MessageList({
   const msgCount = messages?.length ?? 0;
   const lastMsg = messages?.[msgCount - 1];
   const lastMsgId = lastMsg?.id ?? null;
-  const lastMsgContent = lastMsg?.content ?? "";
+  const lastMsgContent = lastMsg?.text ?? "";
 
   useEffect(() => {
     const countGrew = msgCount > prevCountRef.current;
@@ -53,7 +53,7 @@ export default function MessageList({
   useEffect(() => {
     const len = lastMsgContent.length;
     if (len > prevContentLenRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
     prevContentLenRef.current = len;
   }, [lastMsgContent]);
@@ -66,7 +66,6 @@ export default function MessageList({
       const label = downloadText || "Loading model…";
       return `${label}${pct > 0 && pct < 100 ? ` (${pct}%)` : ""}`;
     }
-    if (localAIStatus === "thinking" || localAIInferring) return "Thinking on-device";
     if (localAIStatus === "disposing") return "Unloading model…";
     return null;
   })();
