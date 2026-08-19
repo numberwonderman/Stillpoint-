@@ -698,7 +698,7 @@ async function runCloudPipeline(
       return;
     }
 
-    setStatus("Gemini is typing…");
+    setStatus("Stillpoint is typing…");
 
     tokenQueue = new TokenQueue(
       (tokenSlice) => {
