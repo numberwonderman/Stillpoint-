@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import ThinkingIndicator from "./ThinkingIndicator";
+import Markdown from "./Markdown";
 
 /**
  * ResponseSection — the live region.
@@ -570,14 +571,8 @@ function CopyBlock({ onCopy, copied }) {
 
 function SupportiveResponse({ text, streaming }) {
   return (
-    <p className="supportive-response m-0 rounded-[10px] border border-border border-l-4 border-l-accent bg-surface px-6 py-5">
-      {text}
-      {streaming && (
-        <span
-          aria-hidden="true"
-          className="ml-0.5 inline-block h-[1em] w-[0.5ch] translate-y-[0.15em] animate-pulse bg-accent"
-        />
-      )}
-    </p>
+    <div className="supportive-response m-0 rounded-[10px] border border-border border-l-4 border-l-accent bg-surface px-6 py-5 text-[1rem] leading-relaxed">
+      <Markdown streaming={streaming}>{text}</Markdown>
+    </div>
   );
 }

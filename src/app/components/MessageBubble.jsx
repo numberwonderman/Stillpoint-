@@ -3,6 +3,7 @@
 import { CrisisPanel } from "./ResponseSection";
 import SpeechPlayer from "./SpeechPlayer";
 import ResourceCard from "./ResourceCard";
+import Markdown from "./Markdown";
 import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { useMemo } from "react";
 
@@ -126,10 +127,9 @@ export default function MessageBubble({
                 trailingCaret={false}
               />
             ) : (
-              <p className="m-0 whitespace-pre-wrap leading-relaxed text-[0.95rem] sm:text-[1rem] break-words">
-                {text}
-                {isStreaming && <span aria-hidden="true" className="streaming-caret" />}
-              </p>
+              <div className="md-wrapper text-[0.95rem] sm:text-[1rem]">
+                <Markdown streaming={isStreaming}>{text}</Markdown>
+              </div>
             )}
 
             {!isStreaming && (
