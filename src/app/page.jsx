@@ -9,9 +9,9 @@ export const metadata = {
 const FEATURES = [
   {
     icon: "🔒",
-    title: "Minimal signal",
+    title: "Nothing stored",
     body:
-      "On the cloud path, only a short, general emotion summary is ever sent to Gemini — never your raw words — and never during a crisis.",
+      "On the cloud path, your message is sent to Gemini to generate a response but is never logged or saved — and never sent at all during a crisis.",
   },
   {
     icon: "💻",
@@ -118,9 +118,10 @@ export default function LandingPage() {
 
       <footer className="mx-auto max-w-[640px] border-t border-border px-6 py-6 pb-12 text-center text-sm text-text-muted">
         <p className="m-0">
-          On the cloud path, only a short, general summary of your emotions
-          is ever sent to Gemini — and never during a crisis. Use Local AI
-          mode to keep everything on your device.
+          On the cloud path, your message is sent to Gemini to generate a
+          response — but it&apos;s never logged, stored, or sent during a
+          crisis. Use Local AI mode to keep everything on your device
+          instead.
         </p>
       </footer>
     </main>
