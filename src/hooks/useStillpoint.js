@@ -483,6 +483,7 @@ export function useStillpoint() {
         id: generateId(),
         role: "user",
         text: trimmed,
+        crisisAcknowledged: skipCrisisGate ? true : false,
         createdAt: new Date().toISOString(),
       };
 
@@ -529,6 +530,7 @@ export function useStillpoint() {
         .map((m) => ({
           role: m.role,
           text: m.text,
+          crisisAcknowledged: m.crisisAcknowledged === true,
         }));
 
       // Add user message and pending streaming assistant message
@@ -593,7 +595,8 @@ export function useStillpoint() {
         setAuthRequiredMode,
         user,
         updateAssistantMsg,
-        abortControllerRef
+        abortControllerRef,
+        skipCrisisGate
       );
     },
     [activeThreadId, threads, selectedTier, localAIInferring, isGenerating, user, storageMode]
@@ -741,7 +744,8 @@ async function runCloudPipeline(
   setAuthRequiredMode,
   user,
   updateAssistantMsg,
-  abortControllerRef
+  abortControllerRef,
+  skipCrisisGate
 ) {
   setStatus("Connecting to Gemini…");
   const controller = new AbortController();
@@ -753,7 +757,7 @@ async function runCloudPipeline(
     const res = await fetch("/api/support", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: trimmed, history }),
+      body: JSON.stringify({ text: trimmed, history, skipCrisisGate }),
       signal: controller.signal,
     });
 

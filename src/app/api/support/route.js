@@ -104,6 +104,8 @@ export async function POST(request) {
     );
   }
 
+  const skipCrisisGate = body?.skipCrisisGate === true;
+
   const safeHistory = normalizeHistory(body?.history);
   const conversation = [
     ...safeHistory,
@@ -120,7 +122,10 @@ export async function POST(request) {
   }
 
   // ----- 5. Crisis gate ----------------------------------------------------
-  const gate = await runSafetyGate(conversation, country, trimmed);
+  let gate = { isCrisis: false };
+  if (!skipCrisisGate) {
+    gate = await runSafetyGate(conversation, country, trimmed);
+  }
 
   if (gate.isCrisis) {
     return NextResponse.json(

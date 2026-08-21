@@ -47,6 +47,7 @@ export function normalizeHistory(rawHistory) {
           ? "assistant"
           : "user",
       text: text.slice(0, 50_000),
+      crisisAcknowledged: msg.crisisAcknowledged === true,
     });
   }
 

@@ -38,7 +38,16 @@ export async function runSafetyGate(conversation, country, trimmed) {
   let crisisResources = [];
   let safetyEvaluationAvailable = true;
 
-  const nopeMessages = toNopeMessages(conversation);
+  let startIndex = 0;
+  for (let i = conversation.length - 1; i >= 0; i--) {
+    if (conversation[i].crisisAcknowledged) {
+      startIndex = i + 1;
+      break;
+    }
+  }
+
+  const relevantConversation = conversation.slice(startIndex);
+  const nopeMessages = toNopeMessages(relevantConversation);
 
   const safetyEval = await evaluateSafety(nopeMessages, country);
 
