@@ -271,6 +271,31 @@ export function useStillpoint() {
     });
   }, [storageMode]);
 
+  // Acknowledge / dismiss a crisis panel after a false-positive.
+  // Clears the `crisis` flag on the last assistant message so the
+  // next submit goes to the normal pipeline. The user message that
+  // triggered the gate is kept in the thread so context isn't lost.
+  const acknowledgeCrisis = useCallback(() => {
+    setThreads((prev) => {
+      const updated = prev.map((t) => {
+        if (t.id !== activeThreadId) return t;
+        const updatedMessages = t.messages.map((m, i, arr) => {
+          // Only the LAST assistant message can be the active crisis panel.
+          if (i !== arr.length - 1) return m;
+          if (m.role !== "assistant" || !m.crisis) return m;
+          return { ...m, crisis: false, crisisSeverity: undefined, acknowledgedAt: new Date().toISOString() };
+        });
+        return { ...t, messages: updatedMessages };
+      });
+      try {
+        const storage = storageMode === "local" ? window.localStorage : window.sessionStorage;
+        storage.setItem("stillpoint:threads", JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    setStatus("");
+  }, [activeThreadId, storageMode]);
+
   const stopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -563,6 +588,7 @@ export function useStillpoint() {
     actions: {
       submit,
       stopGeneration,
+      acknowledgeCrisis,
       enableLocalAI,
       disableLocalAI,
       setSelectedTier: handleSetSelectedTier,

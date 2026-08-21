@@ -228,7 +228,7 @@ const SEVERITY_COPY = {
   },
 };
 
-export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion }) {
+export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion, onAcknowledge }) {
   const [copied, setCopied] = useState(false);
   // Default to "elevated" if the server didn't pass severity (older
   // clients, partial responses). The panel still works — it just
@@ -322,6 +322,34 @@ export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion }
         <HelplineList region={region} severity={tier} />
 
         <DetailsDisclosure region={region} onSwitchRegion={onChooseRegion} onCopy={copyResources} copied={copied} />
+
+        {/*
+          "I'm safe — continue" affordance. Sits below every other action
+          so the resources stay the primary focus. Visually muted: a thin
+          text link with a subtle border, NOT a filled button. The point
+          is to let someone exit the crisis panel after a false positive
+          without ever making this look like the recommended path.
+
+          We only render the affordance when an onAcknowledge callback
+          is provided — older callers without it keep the lock-in
+          behavior.
+        */}
+        {onAcknowledge && (
+          <div className="mt-6 border-t border-border/40 pt-4 text-center">
+            <p className="mb-2 text-[0.8125rem] leading-relaxed text-text-muted">
+              Still here by mistake, or already safe? You can step out of
+              this view and keep talking.
+            </p>
+            <button
+              type="button"
+              onClick={onAcknowledge}
+              data-testid="crisis-acknowledge"
+              className="inline-flex min-h-[2.5rem] items-center rounded-[8px] border border-border/60 bg-transparent px-4 py-1.5 text-[0.875rem] font-semibold text-text-muted transition-colors hover:border-accent/50 hover:text-accent focus-visible:outline-2 focus-visible:outline-focus"
+            >
+              I&apos;m safe — continue
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

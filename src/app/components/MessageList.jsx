@@ -20,6 +20,7 @@ export default function MessageList({
   downloadText,
   crisisRegion,
   onChooseCrisisRegion,
+  onAcknowledgeCrisis,
   onReply,
 }) {
   const containerRef = useRef(null);
@@ -123,6 +124,7 @@ export default function MessageList({
             message={msg}
             crisisRegion={crisisRegion}
             onChooseCrisisRegion={onChooseCrisisRegion}
+            onAcknowledgeCrisis={onAcknowledgeCrisis}
           />
         ))}
 

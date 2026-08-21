@@ -11,6 +11,7 @@ export default function MessageBubble({
   message,
   crisisRegion,
   onChooseCrisisRegion,
+  onAcknowledgeCrisis,
 }) {
   const { role, text, status, crisis, crisisSeverity, localAIStopped, resources } = message;
   const browserLang = typeof navigator !== "undefined" ? navigator.language : "en-US";
@@ -87,6 +88,7 @@ export default function MessageBubble({
             localAIStopped={localAIStopped}
             region={crisisRegion}
             onChooseRegion={onChooseCrisisRegion}
+            onAcknowledge={onAcknowledgeCrisis}
           />
         </div>
       </div>

@@ -85,6 +85,7 @@ export default function AppPage() {
         downloadText={state.downloadText}
         crisisRegion={state.crisisRegion}
         onChooseCrisisRegion={actions.chooseCrisisRegion}
+        onAcknowledgeCrisis={actions.acknowledgeCrisis}
         onReply={actions.submit}
       />
 
