@@ -361,7 +361,7 @@ export async function signpostResources({
         headers: {
           Authorization: `Bearer ${NOPE_API_KEY}`,
         },
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(15_000),
       }
     );
 
