@@ -65,8 +65,6 @@ context is kept only in the browser (`sessionStorage` by default, or
 cloud path, messages are decoupled from user identity and protected by a
 mandatory Crisis Gate powered by the NOPE API. On the Local AI path, nothing leaves your device at all.
 
-> **See how StillPoint compares to generic AI assistants:** Check out our [Comparison Dataset](docs/comparison_dataset.md) to understand why our "listening over solving" architecture outperforms generic solutions.
-
 ## Features
 
 - **Multi-turn chat with thread history** — the sidebar lists all conversations.
