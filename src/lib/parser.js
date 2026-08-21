@@ -157,13 +157,31 @@ function detectCrisis(normalizedText) {
   const categories = new Set();
   let matched = false;
 
+  // Soft-group rule bookkeeping:
+  //   softHits  — categories from the soft self_harm_soft group that fired.
+  //   demoted   — categories named by a CRISIS_PATTERNS entry's `demotes`
+  //               field that fired.
+  // A soft_harm_soft hit by itself does NOT trip the gate unless another
+  // non-soft, non-hedge category has also fired. This is what makes
+  // "I feel like hurting myself" pass through while "I'm cutting myself
+  // right now" still trips.
+  const softHits = new Set();
+  const demoted = new Set();
+
   // 1) Phrase-based signals — word-boundary matched for safety.
   for (const group of Object.values(CRISIS_SIGNALS)) {
+    const isSoftGroup = group.category === "self_harm_soft";
     for (const phrase of group.phrases) {
       if (phraseRegex(phrase).test(stripped)) {
         matched = true;
-        score += group.weight;
         categories.add(group.category);
+        if (isSoftGroup) {
+          // Record the soft hit but do NOT add its weight yet — see the
+          // soft-group rule below.
+          softHits.add(group.category);
+        } else {
+          score += group.weight;
+        }
         // Don't break — multiple matches across categories raise severity.
       }
     }
@@ -171,13 +189,53 @@ function detectCrisis(normalizedText) {
 
   // 2) Pattern-based signals — regexes for shapes the phrase list can't
   // catch (e.g. "i'm gonna [verb] myself"). Run on the stripped text so
-  // contractions behave the same as the phrase list.
-  for (const { pattern, weight, category } of CRISIS_PATTERNS) {
+  // contractions behave the same as the phrase list. Also pick up any
+  // `demotes` array the entry declares — these suppress the named
+  // soft-group categories (used by the hedging patterns in lexicon.js).
+  for (const entry of CRISIS_PATTERNS) {
+    const { pattern, weight, category } = entry;
     if (pattern.test(stripped)) {
       matched = true;
-      score += weight;
       categories.add(category);
+      score += weight;
+      if (Array.isArray(entry.demotes)) {
+        for (const c of entry.demotes) demoted.add(c);
+      }
     }
+  }
+
+  // 3) Soft-group rule.
+  //
+  // If a self_harm_soft phrase matched but no other non-soft, non-hedge
+  // category has fired, and the soft category was not demoted by a
+  // CRISIS_PATTERNS `demotes` entry, the gate does NOT trip. This is
+  // the core fix for the false-positive on "I feel like hurting myself"
+  // and similar hedging phrasings.
+  //
+  // If a non-soft category DID fire (e.g. means, intent, plan, active
+  // self_harm, ideation, etc.) we treat the soft hit as an additional
+  // signal: it contributes its weight to the score so severity can
+  // still rise. If the soft category was demoted by a hedge pattern,
+  // it contributes nothing regardless.
+  let hasNonSoftHit = false;
+  for (const cat of categories) {
+    if (cat !== "self_harm_soft" && !cat.endsWith("_hedge")) {
+      hasNonSoftHit = true;
+      break;
+    }
+  }
+
+  if (matched && softHits.size > 0 && !hasNonSoftHit) {
+    // Suppress: nothing here is a real crisis signal. Soft self-harm
+    // framings ("I feel like hurting myself", "the idea of self-harm",
+    // "I'm not actually going to...") on their own do not trip the gate.
+    return { matched: false };
+  }
+
+  // Soft hits co-firing with a real signal: add their weight now, but
+  // not if the soft category was demoted by a CRISIS_PATTERNS rule.
+  if (softHits.size > 0 && !demoted.has("self_harm_soft")) {
+    score += 1; // self_harm_soft weight
   }
 
   if (!matched) {

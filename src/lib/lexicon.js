@@ -137,6 +137,7 @@ export const CRISIS_SIGNALS = {
       "hang myself",
       "hanging myself",
       "overdose",
+      "overdosed",
       "overdosing",
       "swallow pills",
       "took all my pills",
@@ -196,26 +197,49 @@ export const CRISIS_SIGNALS = {
     ],
   },
 
-  // Self-harm — current or recent, with or without suicidal intent.
-  // Always triages to crisis panel because harm-reduction resources matter.
-  self_harm: {
-    category: "self_harm",
+  // Self-harm — ACTIVE behavior. Present-tense or recent-tense, with or
+  // without suicidal intent. Always triages to crisis panel because
+  // harm-reduction resources matter. Soft / hypothetical framings live
+  // in self_harm_soft and are scored by the parser's soft-group rule.
+  //
+  // The bare abstract noun "self-harm" / "self harm" is intentionally
+  // NOT listed here — on its own it doesn't indicate active behavior
+  // ("I've been wanting to self-harm" is hedging, not action). The
+  // active self_harm_active regex in CRISIS_PATTERNS still catches
+  // present-tense framings like "i'm cutting myself right now".
+  self_harm_active: {
+    category: "self_harm_active",
     weight: 3,
+    phrases: [
+      "cutting myself",
+      "cut myself",
+      "cuts on my arm",
+      "cut on my arm",
+      "burning myself",
+      "burned myself",
+      "hitting myself",
+      "hit myself",
+      "pulled out my hair",
+      "pulling out my hair",
+      "picking at my skin",
+      "starving myself",
+      "not eating on purpose",
+    ],
+  },
+
+  // Self-harm — SOFT / HYPOTHETICAL. Phrasings like "I feel like hurting
+  // myself" or "I've been wanting to self-harm" or "the idea of hurting
+  // myself". On its own this does NOT trip the gate (see parser.js
+  // soft-group scoring rule). It only contributes weight when another
+  // non-soft crisis category has already fired.
+  self_harm_soft: {
+    category: "self_harm_soft",
+    weight: 1,
     phrases: [
       "hurt myself",
       "hurting myself",
       "self-harm",
       "self harm",
-      "cutting myself",
-      "cut myself",
-      "burning myself",
-      "burned myself",
-      "hit myself",
-      "hitting myself",
-      "pulled out my hair",
-      "picking at my skin",
-      "starving myself",
-      "not eating on purpose",
     ],
   },
 
@@ -306,6 +330,47 @@ export const CRISIS_PATTERNS = [
     category: "ideation",
     weight: 3,
     pattern: /\b(?:i|we)\s+(?:should|ought to|need to|have to|gotta|might|might as well|may as well)\s+(?:just\s+)?(?:end it|kill myself|die|disappear)\b/,
+  },
+
+  // ---------------------------------------------------------------------
+  // Active self-harm patterns (defense in depth on top of self_harm_active
+  // phrases). Catches present-tense framings like "i'm cutting myself
+  // right now" or "i just burned myself".
+  // ---------------------------------------------------------------------
+  {
+    category: "self_harm_active",
+    weight: 3,
+    pattern: /\b(?:i|im|i am|i'?m)\s+(?:just|right\s+now|rn)?\s*(?:cutting|hitting|burning|pulling\s+out\s+my\s+hair|starving|starved|hurting\s+on\s+purpose)\s+myself\b/,
+  },
+
+  // ---------------------------------------------------------------------
+  // Hedging demotions — match the soft self-harm surface in a hedging
+  // frame. They do NOT add weight; they DEMOTE the self_harm_soft
+  // contribution (see parser.js soft-group rule).
+  //
+  // Covers "i feel like / want to / been wanting / sometimes think about
+  // / thoughts of / fantasized about" + the self-harm action verb.
+  // ---------------------------------------------------------------------
+  {
+    category: "self_harm_hedge",
+    weight: 0,
+    demotes: ["self_harm_soft"],
+    pattern: /\b(?:i|im|i'?m|i\s+am)\s+(?:(?:sometimes|often|always|just)\s+)?(?:feel\s+like|wanted\s+to|wanna|want\s+to|wanted|been\s+wanting|have\s+wanted|am\s+wanting|think\s+about|thought\s+about|thinking\s+about|thoughts\s+of|fantasiz\w+\s+about|dreamed?\s+about|consider\w+)\s+(?:hurting|hurt|cutting|hitting|burning|killing|self[-\s]?harm)\b/,
+  },
+  // "the idea of hurting myself" / "the thought of cutting myself"
+  {
+    category: "self_harm_hedge",
+    weight: 0,
+    demotes: ["self_harm_soft"],
+    pattern: /\b(?:the\s+(?:idea|thought)\s+of)\s+(?:hurting|hurt|cutting|hitting|burning|killing|self[-\s]?harm)\b/,
+  },
+  // "i'm not actually going to do it / not really going to hurt myself" —
+  // explicit non-action framing.
+  {
+    category: "self_harm_hedge",
+    weight: 0,
+    demotes: ["self_harm_soft"],
+    pattern: /\b(?:i|im|i'?m)\s+(?:am\s+)?not\s+(?:actually\s+|really\s+|gonna\s+|going\s+to\s+)?(?:do\s+(?:it|anything)|hurt\s+myself|kill\s+myself|self[-\s]?harm)/,
   },
 ];
 
