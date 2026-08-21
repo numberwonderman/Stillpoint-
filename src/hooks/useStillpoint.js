@@ -272,10 +272,16 @@ export function useStillpoint() {
   }, [storageMode]);
 
   // Acknowledge / dismiss a crisis panel after a false-positive.
-  // Clears the `crisis` flag on the last assistant message so the
-  // next submit goes to the normal pipeline. The user message that
-  // triggered the gate is kept in the thread so context isn't lost.
+  // Clears the `crisis` flag on the last assistant message, marks the
+  // user message that triggered the gate as `crisisAcknowledged: true`
+  // (so resubmitting the same text won't re-trip the gate), and then
+  // resubmits the original user message so the AI actually responds.
+  // Without the resubmit, the panel just disappears and the user is
+  // left staring at an empty screen — the bug reported as "the AI
+  // doesn't respond" after clicking "I'm safe — continue".
   const acknowledgeCrisis = useCallback(() => {
+    let resubmitText = null;
+
     setThreads((prev) => {
       const updated = prev.map((t) => {
         if (t.id !== activeThreadId) return t;
@@ -283,8 +289,22 @@ export function useStillpoint() {
           // Only the LAST assistant message can be the active crisis panel.
           if (i !== arr.length - 1) return m;
           if (m.role !== "assistant" || !m.crisis) return m;
+          // The user message that triggered the gate is the one
+          // immediately before this assistant message.
+          const triggerUserMsg = i > 0 ? arr[i - 1] : null;
+          if (
+            triggerUserMsg &&
+            triggerUserMsg.role === "user" &&
+            !triggerUserMsg.crisisAcknowledged
+          ) {
+            resubmitText = triggerUserMsg.text;
+            return [
+              { ...triggerUserMsg, crisisAcknowledged: true },
+              { ...m, crisis: false, crisisSeverity: undefined, acknowledgedAt: new Date().toISOString() },
+            ];
+          }
           return { ...m, crisis: false, crisisSeverity: undefined, acknowledgedAt: new Date().toISOString() };
-        });
+        }).flat();
         return { ...t, messages: updatedMessages };
       });
       try {
@@ -294,7 +314,27 @@ export function useStillpoint() {
       return updated;
     });
     setStatus("");
+
+    // Auto-resubmit the original user text so the AI actually replies.
+    // The user has explicitly said "I'm safe" — the next submit should
+    // skip the crisis gate and go straight to the normal pipeline.
+    // Read isGenerating from a ref so this callback doesn't capture
+    // a stale value (and so we don't introduce a forward dependency
+    // on a value declared further down in the hook body).
+    if (resubmitText && !isGeneratingRef.current) {
+      // Defer so the state update above lands first; otherwise the
+      // resubmit races the cleared crisis flag.
+      setTimeout(() => {
+        submitRef.current?.(resubmitText, { skipCrisisGate: true });
+      }, 0);
+    }
   }, [activeThreadId, storageMode]);
+
+  // Stable refs so acknowledgeCrisis (declared above) can read the
+  // current values of isGenerating / submit without those values
+  // having to be declared earlier in the function body.
+  const submitRef = useRef(null);
+  const isGeneratingRef = useRef(false);
 
   const stopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
@@ -410,7 +450,8 @@ export function useStillpoint() {
     (status !== "" && !error);
 
   const submit = useCallback(
-    async (rawText) => {
+    async (rawText, options = {}) => {
+      const { skipCrisisGate = false } = options || {};
       if (isGenerating) return;
       const trimmed = (rawText || "").trim();
       if (!trimmed) {
@@ -445,8 +486,11 @@ export function useStillpoint() {
         createdAt: new Date().toISOString(),
       };
 
-      // Client-side crisis gate
-      const result = parseInput(trimmed);
+      // Client-side crisis gate. Skipped when the user has just
+      // dismissed a crisis panel via "I'm safe — continue" — they've
+      // explicitly said the gate was a false positive, and re-running
+      // it would loop them straight back into the panel.
+      const result = skipCrisisGate ? { isCrisis: false } : parseInput(trimmed);
 
       if (result.isCrisis) {
         let stopped = false;
@@ -554,6 +598,16 @@ export function useStillpoint() {
     },
     [activeThreadId, threads, selectedTier, localAIInferring, isGenerating, user, storageMode]
   );
+
+  // Keep submitRef / isGeneratingRef pointing at the latest values so
+  // acknowledgeCrisis (which captures a stable callback) can read them
+  // without forcing a re-render every time those values change.
+  useEffect(() => {
+    submitRef.current = submit;
+  }, [submit]);
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
 
   return {
     state: {

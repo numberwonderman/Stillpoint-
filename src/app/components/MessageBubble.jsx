@@ -13,7 +13,7 @@ export default function MessageBubble({
   onChooseCrisisRegion,
   onAcknowledgeCrisis,
 }) {
-  const { role, text, status, crisis, crisisSeverity, localAIStopped, resources } = message;
+  const { role, text, status, crisis, crisisSeverity, localAIStopped, resources, acknowledgedAt } = message;
   const browserLang = typeof navigator !== "undefined" ? navigator.language : "en-US";
 
   // Hooks must run unconditionally for every render — keep them above
@@ -90,6 +90,20 @@ export default function MessageBubble({
             onChooseRegion={onChooseCrisisRegion}
             onAcknowledge={onAcknowledgeCrisis}
           />
+        </div>
+      </div>
+    );
+  }
+
+  // Acknowledged crisis panel — the user clicked "I'm safe — continue".
+  // Render a small, quiet transitional note in place of the now-empty
+  // assistant bubble, so the user has visible confirmation that the
+  // dismissal registered and the conversation is continuing.
+  if (role === "assistant" && acknowledgedAt) {
+    return (
+      <div className="mb-3 flex justify-start w-full">
+        <div className="rounded-full border border-border/40 bg-surface/50 px-3 py-1.5 text-[0.8125rem] text-text-muted">
+          ✓ Crisis panel dismissed — continuing the conversation.
         </div>
       </div>
     );
