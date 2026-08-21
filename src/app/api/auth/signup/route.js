@@ -59,7 +59,7 @@ export async function POST(request) {
     return response;
   } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Something went wrong creating your account." },
+      { error: "Something went wrong creating your account." },
       { status: 500 }
     );
   }

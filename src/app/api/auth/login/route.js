@@ -52,7 +52,7 @@ export async function POST(request) {
     return response;
   } catch (err) {
     return NextResponse.json(
-      { error: err.message || "Something went wrong logging you in." },
+      { error: "Something went wrong logging you in." },
       { status: 500 }
     );
   }
