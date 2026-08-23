@@ -38,7 +38,7 @@ from kokoro import KPipeline
 SAMPLE_RATE = 24_000          # Kokoro native sample rate
 PESQ_RATE   = 16_000          # PESQ wideband requires 16 kHz
 
-PRECISIONS = ["FP32", "BF16", "INT8"]
+PRECISIONS = ["FP32", "FP32-CL", "BF16", "INT8"]
 
 # ---------------------------------------------------------------------------
 # Internal pipeline cache
@@ -67,6 +67,23 @@ _BF16_AUTOCAST_TAG = "__bf16_autocast__"
 def _build_fp32() -> KPipeline:
     """Baseline FP32 pipeline (same as the production CPU pipeline)."""
     return KPipeline(lang_code="a")
+
+
+def _build_fp32_cl() -> KPipeline:
+    """
+    FP32 Channels Last pipeline.
+    Intel MKL-DNN heavily optimizes convolutions when the memory format is
+    NHWC (channels_last) instead of PyTorch's default NCHW (contiguous_format).
+    Since Kokoro is dominated by `aten::mkldnn_convolution`, this should provide
+    a significant speedup.
+    """
+    pipe = KPipeline(lang_code="a")
+    m = _find_model(pipe)
+    if m is not None:
+        m.to(memory_format=torch.channels_last)
+    else:
+        raise RuntimeError("Cannot locate nn.Module for channels_last cast.")
+    return pipe
 
 
 def _build_bf16() -> KPipeline:
@@ -132,6 +149,12 @@ def _ensure_pipelines() -> None:
         _BENCH_CACHE["FP32"] = f"LOAD ERROR: {exc}"
         return
 
+    print("[benchmark] building FP32-CL pipeline …")
+    try:
+        _BENCH_CACHE["FP32-CL"] = _build_fp32_cl()
+    except Exception as exc:
+        _BENCH_CACHE["FP32-CL"] = f"LOAD ERROR: {exc}"
+
     print("[benchmark] building BF16 pipeline …")
     try:
         _BENCH_CACHE["BF16"] = _build_bf16()
@@ -178,6 +201,7 @@ def _run_pipeline(
     """
     chunks = []
 
+    @torch.inference_mode()
     def _collect():
         for _, _, audio in pipe(text, voice=voice, speed=speed):
             chunk = _to_numpy(audio)

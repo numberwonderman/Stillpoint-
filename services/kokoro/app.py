@@ -238,6 +238,7 @@ with gr.Blocks(
             | Mode | Description |
             |------|-------------|
             | FP32 | Default float32 — current production mode |
+            | FP32-CL | Float32 with `channels_last` memory format (NHWC). Greatly speeds up MKL-DNN convolutions on CPU. |
             | BF16 | Weights cast to bfloat16 (AVX-512 BF16 on modern Intel/AMD CPUs) |
             | INT8 | `torch.quantization.quantize_dynamic` on all `nn.Linear` layers |
 
@@ -340,7 +341,7 @@ with gr.Blocks(
 
         with gr.Row():
             prof_precision = gr.Dropdown(
-                choices=["FP32", "BF16", "INT8"],
+                choices=["FP32", "FP32-CL", "BF16", "INT8"],
                 value="FP32",
                 label="Precision Mode",
                 scale=1,
