@@ -19,11 +19,9 @@ and cached for subsequent runs.
 
 from __future__ import annotations
 
-import copy
 import gc
 import time
 import tracemalloc
-import warnings
 from typing import Any
 
 import numpy as np
@@ -48,63 +46,83 @@ PRECISIONS = ["FP32", "BF16", "INT8"]
 _BENCH_CACHE: dict[str, Any] = {}   # precision -> KPipeline or error string
 
 
+def _find_model(pipe: KPipeline) -> nn.Module | None:
+    """
+    Return the underlying nn.Module from a KPipeline.
+
+    The attribute name varies across kokoro versions; try the most common ones.
+    """
+    for attr in ("model", "net", "model_", "_model"):
+        m = getattr(pipe, attr, None)
+        if isinstance(m, nn.Module):
+            return m
+    return None
+
+
 def _build_fp32() -> KPipeline:
     """Baseline FP32 pipeline (same as the production CPU pipeline)."""
     return KPipeline(lang_code="a")
 
 
-def _build_bf16(base: KPipeline) -> KPipeline:
+def _build_bf16() -> KPipeline:
     """
-    BF16 pipeline: cast the model weights to bfloat16.
+    BF16 pipeline: load a fresh KPipeline and cast model weights in-place.
 
-    BF16 is supported natively on x86 CPUs with AVX-512 BF16 (Intel Ice Lake+).
-    On older CPUs torch will still run but in software emulation, which may be
-    *slower* than FP32 — that is fine for a benchmark; we just report it.
+    We load fresh instead of deepcopy because Kokoro uses weight_norm which
+    blocks deepcopy (pytorch/pytorch#103001).
+
+    BF16 is natively accelerated on Intel Ice Lake+ / AMD Zen 4+ CPUs with
+    AVX-512 BF16. On older CPUs torch falls back to software emulation —
+    still correct, just potentially slower than FP32.
     """
-    pipe = copy.deepcopy(base)
-    if hasattr(pipe, "model") and isinstance(pipe.model, nn.Module):
-        pipe.model = pipe.model.to(torch.bfloat16)
+    pipe = KPipeline(lang_code="a")
+    m = _find_model(pipe)
+    if m is not None:
+        m.to(torch.bfloat16)
     else:
-        # Try known attribute names used by different kokoro versions.
-        for attr in ("net", "model_", "_model"):
-            m = getattr(pipe, attr, None)
-            if isinstance(m, nn.Module):
-                setattr(pipe, attr, m.to(torch.bfloat16))
-                break
+        raise RuntimeError(
+            "Cannot locate nn.Module inside KPipeline for BF16 cast. "
+            "Inspect pipe.__dict__ for the correct attribute name."
+        )
     return pipe
 
 
-def _build_int8(base: KPipeline) -> KPipeline:
+def _build_int8() -> KPipeline:
     """
-    INT8 pipeline: apply torch.quantization.quantize_dynamic to all
-    nn.Linear layers in the model.
+    INT8 pipeline: load a fresh KPipeline then apply quantize_dynamic in-place.
 
-    Dynamic quantization quantises weights to int8 at inference time and
-    keeps activations in float32, so no calibration dataset is needed.
+    Dynamic quantization quantises nn.Linear weights to int8 at inference time
+    and keeps activations in float32 — no calibration dataset needed.
+    We replace the model attribute directly to avoid any deepcopy.
     """
-    pipe = copy.deepcopy(base)
-
-    def _quantize_module(m: nn.Module) -> nn.Module:
-        return torch.quantization.quantize_dynamic(
-            m,
-            {nn.Linear},
-            dtype=torch.qint8,
+    pipe = KPipeline(lang_code="a")
+    m = _find_model(pipe)
+    if m is None:
+        raise RuntimeError(
+            "Cannot locate nn.Module inside KPipeline for INT8 quantization. "
+            "Inspect pipe.__dict__ for the correct attribute name."
         )
 
-    if hasattr(pipe, "model") and isinstance(pipe.model, nn.Module):
-        pipe.model = _quantize_module(pipe.model)
-    else:
-        for attr in ("net", "model_", "_model"):
-            m = getattr(pipe, attr, None)
-            if isinstance(m, nn.Module):
-                setattr(pipe, attr, _quantize_module(m))
-                break
+    quantized = torch.quantization.quantize_dynamic(
+        m,
+        {nn.Linear},
+        dtype=torch.qint8,
+    )
+
+    # Replace the model attribute in-place on the pipe object.
+    for attr in ("model", "net", "model_", "_model"):
+        if isinstance(getattr(pipe, attr, None), nn.Module):
+            setattr(pipe, attr, quantized)
+            break
+
     return pipe
 
 
 def _ensure_pipelines() -> None:
     """Populate the pipeline cache if not already done."""
-    if _BENCH_CACHE:
+    # Only skip if all three loaded successfully as KPipeline instances.
+    # A partial or errored cache (e.g. from a previous crash) will be rebuilt.
+    if all(isinstance(_BENCH_CACHE.get(p), KPipeline) for p in PRECISIONS):
         return
 
     print("[benchmark] building FP32 pipeline …")
@@ -117,13 +135,13 @@ def _ensure_pipelines() -> None:
 
     print("[benchmark] building BF16 pipeline …")
     try:
-        _BENCH_CACHE["BF16"] = _build_bf16(fp32)
+        _BENCH_CACHE["BF16"] = _build_bf16()
     except Exception as exc:
         _BENCH_CACHE["BF16"] = f"LOAD ERROR: {exc}"
 
     print("[benchmark] building INT8 pipeline …")
     try:
-        _BENCH_CACHE["INT8"] = _build_int8(fp32)
+        _BENCH_CACHE["INT8"] = _build_int8()
     except Exception as exc:
         _BENCH_CACHE["INT8"] = f"LOAD ERROR: {exc}"
 
