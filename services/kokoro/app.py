@@ -14,7 +14,7 @@ from tts import (
     generate_gpu,
 )
 
-from benchmark import run_benchmark, SAMPLE_RATE as BENCH_SAMPLE_RATE
+from benchmark import run_benchmark, SAMPLE_RATE as BENCH_SAMPLE_RATE, profile_ops, profile_chunks
 
 import uvicorn
 
@@ -133,6 +133,20 @@ def gradio_benchmark(text, voice, speed):
     summary_md = "  \n".join(lines)
 
     return table_rows, fp32_audio, bf16_audio, int8_audio, summary_md
+
+
+# ---------------------------------------------------------
+# Profiling wrapper
+# ---------------------------------------------------------
+
+def gradio_profile(precision, text, voice, speed):
+    if not text or not text.strip():
+        raise gr.Error("Text cannot be empty.")
+
+    ops_rows, ops_summary = profile_ops(precision, text.strip(), voice, speed)
+    chunks_rows, chunks_summary = profile_chunks(precision, text.strip(), voice, speed)
+
+    return ops_rows, ops_summary, chunks_rows, chunks_summary
 
 
 # ---------------------------------------------------------
@@ -312,6 +326,89 @@ with gr.Blocks(
                 bench_summary,
             ],
             api_name="benchmark",
+        )
+
+    # ---- Tab 3: Profiling ----
+    with gr.Tab("🔍 Profiling"):
+
+        gr.Markdown(
+            """
+            ## Deep Profiling
+            Analyze where time is spent during inference to identify bottlenecks.
+            """
+        )
+
+        with gr.Row():
+            prof_precision = gr.Dropdown(
+                choices=["FP32", "BF16", "INT8"],
+                value="FP32",
+                label="Precision Mode",
+                scale=1,
+            )
+            prof_text = gr.Textbox(
+                label="Text",
+                lines=3,
+                value="The quick brown fox jumps over the lazy dog near the riverbank.",
+                scale=3,
+            )
+
+        with gr.Row():
+            prof_voice = gr.Dropdown(
+                choices=[
+                    "af_heart",
+                    "af_bella",
+                    "af_nicole",
+                    "am_michael",
+                    "bf_emma",
+                    "bm_george",
+                ],
+                value="af_heart",
+                label="Voice",
+                scale=2,
+            )
+            prof_speed = gr.Slider(
+                minimum=0.5,
+                maximum=2.0,
+                value=1.0,
+                step=0.05,
+                label="Speed",
+                scale=2,
+            )
+
+        prof_button = gr.Button(
+            "🔍 Run Profiler",
+            variant="primary",
+        )
+
+        gr.Markdown("### Per-Chunk Timing (Latency Breakdown)")
+        prof_chunks_table = gr.DataFrame(
+            label="Chunks",
+            headers=["Chunk", "Stage", "Δt (ms)", "Audio dur (ms)", "RTF (×RT)", "Cumulative (ms)"],
+        )
+        prof_chunks_summary = gr.Markdown()
+
+        gr.Markdown("### Op-Level Profiling (CPU Time Breakdown)")
+        prof_ops_table = gr.DataFrame(
+            label="Ops",
+            headers=["Op", "Self CPU (ms)", "CPU Total (ms)", "% of Total", "Calls"],
+        )
+        prof_ops_summary = gr.Markdown()
+
+        prof_button.click(
+            fn=gradio_profile,
+            inputs=[
+                prof_precision,
+                prof_text,
+                prof_voice,
+                prof_speed,
+            ],
+            outputs=[
+                prof_ops_table,
+                prof_ops_summary,
+                prof_chunks_table,
+                prof_chunks_summary,
+            ],
+            api_name="profile",
         )
 
 

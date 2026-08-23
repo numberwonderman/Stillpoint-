@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.profiler
 from kokoro import KPipeline
 
 
@@ -385,3 +386,160 @@ def run_benchmark(
             row.setdefault("Speedup", "—")
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Profiling: op-level breakdown  (torch.profiler)
+# ---------------------------------------------------------------------------
+
+def profile_ops(
+    precision: str,
+    text: str,
+    voice: str,
+    speed: float,
+    top_n: int = 25,
+) -> tuple[list[dict], str]:
+    """
+    Run torch.profiler on one precision mode and return the top-N operators
+    by self CPU time.
+
+    Returns (rows, summary_markdown).
+    rows columns: Op, Self CPU (ms), CPU Total (ms), % of Total, Calls
+    """
+    _ensure_pipelines()
+    pipe_or_err = _BENCH_CACHE.get(precision)
+
+    if isinstance(pipe_or_err, str):
+        return [], f"Pipeline not available: {pipe_or_err}"
+
+    pipe: KPipeline = pipe_or_err
+    use_bf16 = (precision == "BF16")
+
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU],
+        record_shapes=False,
+        profile_memory=False,
+        with_stack=False,
+    ) as prof:
+        _run_pipeline(pipe, text, voice, speed, use_bf16_autocast=use_bf16)
+
+    avgs = prof.key_averages()
+    total_self_us = sum(k.self_cpu_time_total for k in avgs) or 1
+
+    top = sorted(avgs, key=lambda k: k.self_cpu_time_total, reverse=True)[:top_n]
+
+    rows = []
+    for item in top:
+        self_ms  = item.self_cpu_time_total / 1_000
+        total_ms = item.cpu_time_total      / 1_000
+        pct      = item.self_cpu_time_total / total_self_us * 100
+        rows.append({
+            "Op":             item.key,
+            "Self CPU (ms)":  round(self_ms,  2),
+            "CPU Total (ms)": round(total_ms, 2),
+            "% of Total":     f"{pct:.1f}%",
+            "Calls":          item.count,
+        })
+
+    top3 = ", ".join(
+        f"`{r['Op']}` ({r['% of Total']})" for r in rows[:3]
+    )
+    total_s = total_self_us / 1_000_000
+    summary = (
+        f"**{precision}** profiled in {total_s:.2f}s.  \n"
+        f"Top 3 ops: {top3}.  \n"
+        "If LSTM/RNN ops dominate → INT8 Linear quantization won't help. "
+        "Target ONNX Runtime or operator fusion instead."
+    )
+    return rows, summary
+
+
+# ---------------------------------------------------------------------------
+# Profiling: per-chunk stage timing
+# ---------------------------------------------------------------------------
+
+def profile_chunks(
+    precision: str,
+    text: str,
+    voice: str,
+    speed: float,
+) -> tuple[list[dict], str]:
+    """
+    Time each KPipeline generator yield individually.
+
+    The first yield includes G2P (grapheme-to-phoneme) startup + first
+    synthesis chunk. Subsequent yields are pure synthesis.
+    This reveals whether latency is front-loaded (G2P) or per-token (synthesis).
+
+    Returns (rows, summary_markdown).
+    rows columns: Chunk, Stage, Δt (ms), Audio dur (ms), RTF (xRT), Cumulative (ms)
+    """
+    _ensure_pipelines()
+    pipe_or_err = _BENCH_CACHE.get(precision)
+
+    if isinstance(pipe_or_err, str):
+        return [], f"Pipeline not available: {pipe_or_err}"
+
+    pipe: KPipeline = pipe_or_err
+    use_bf16 = (precision == "BF16")
+
+    rows: list[dict] = []
+    t0   = time.perf_counter()
+    t_prev = t0
+
+    def _collect():
+        nonlocal t_prev
+        for i, (_, _, audio) in enumerate(pipe(text, voice=voice, speed=speed)):
+            t_now   = time.perf_counter()
+            delta_s = t_now - t_prev
+            t_prev  = t_now
+
+            arr = _to_numpy(audio)
+            samples      = arr.size if arr is not None else 0
+            audio_dur_ms = samples / SAMPLE_RATE * 1_000
+            rtf          = (audio_dur_ms / 1_000) / delta_s if delta_s > 0 else float("inf")
+
+            rows.append({
+                "Chunk":          i,
+                "Stage":          "G2P + synthesis" if i == 0 else "synthesis",
+                "Δt (ms)":        round(delta_s * 1_000, 1),
+                "Audio dur (ms)": round(audio_dur_ms, 1),
+                "RTF (×RT)":      f"{rtf:.2f}×" if rtf != float("inf") else "∞",
+                "Cumulative (ms)":round((t_now - t0) * 1_000, 1),
+            })
+
+    if use_bf16:
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            _collect()
+    else:
+        _collect()
+
+    total_ms = (time.perf_counter() - t0) * 1_000
+
+    if not rows:
+        return [], f"No chunks produced for {precision}."
+
+    first_ms = rows[0]["Δt (ms)"]
+    rest_ms  = [r["Δt (ms)"] for r in rows[1:]]
+    avg_rest = sum(rest_ms) / len(rest_ms) if rest_ms else 0
+    n        = len(rows)
+
+    summary = (
+        f"**{precision}** — {n} chunk(s), {total_ms:.0f} ms total.  \n"
+        f"Chunk 0 (G2P + first synthesis): **{first_ms:.0f} ms**  \n"
+        f"Avg subsequent chunks: **{avg_rest:.0f} ms**  \n"
+    )
+    if first_ms > 0.5 * total_ms:
+        summary += (
+            "⚠️ **First chunk dominates** — bottleneck is G2P / model startup, "
+            "not raw synthesis throughput. Caching phonemes would help."
+        )
+    elif avg_rest > 200:
+        summary += (
+            "⚠️ **Slow per-chunk synthesis** — likely LSTM/RNN forward pass. "
+            "INT8 Linear quant won't help; try ONNX Runtime with LSTM kernels."
+        )
+    else:
+        summary += "✅ Latency is well-distributed; no single chunk dominates."
+
+    return rows, summary
