@@ -1,19 +1,11 @@
-from io import BytesIO
+import os
 
 import gradio as gr
-import numpy as np
-import soundfile as sf
 
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-
-from auth import require_auth
 from quota import (
     gpu_available_for_attempt,
     record_gpu_quota_failure,
     record_gpu_success,
-    status as quota_status,
 )
 
 from tts import (
@@ -22,61 +14,26 @@ from tts import (
 )
 
 
-MAX_TEXT_LENGTH = 2000
-
-
-app = FastAPI(
-    title="StillPoint Kokoro TTS",
-    version="0.1.0",
-)
-
-
 # ---------------------------------------------------------
-# Request schema
+# Gradio inference wrapper
 # ---------------------------------------------------------
 
-class TTSRequest(BaseModel):
-
-    text: str = Field(
-        min_length=1,
-        max_length=MAX_TEXT_LENGTH,
-    )
-
-    voice: str = "af_heart"
-
-    speed: float = Field(
-        default=1.0,
-        ge=0.5,
-        le=2.0,
-    )
-
-
-# ---------------------------------------------------------
-# TTS
-# ---------------------------------------------------------
-
-def synthesize(
-    text: str,
-    voice: str,
-    speed: float,
+def gradio_generate(
+    text,
+    voice,
+    speed,
 ):
+
+    if not text or not text.strip():
+        raise gr.Error("Text cannot be empty.")
 
     text = text.strip()
 
-    if not text:
-        raise HTTPException(
-            status_code=400,
-            detail="Text cannot be empty.",
-        )
-
-    # ---------------------------------------------
-    # Try ZeroGPU
-    # ---------------------------------------------
+    # Try ZeroGPU first.
 
     if gpu_available_for_attempt():
 
         try:
-
             sample_rate, audio = generate_gpu(
                 text,
                 voice,
@@ -95,12 +52,6 @@ def synthesize(
 
             message = str(exc)
 
-            # IMPORTANT:
-            #
-            # We don't fallback for every error.
-            #
-            # Only quota/scheduler failures should
-            # trigger CPU fallback.
             if (
                 "quota" not in message.lower()
                 and "zerogpu" not in message.lower()
@@ -110,10 +61,6 @@ def synthesize(
             record_gpu_quota_failure(
                 message
             )
-
-    # ---------------------------------------------
-    # CPU fallback
-    # ---------------------------------------------
 
     sample_rate, audio = generate_cpu(
         text,
@@ -129,112 +76,11 @@ def synthesize(
 
 
 # ---------------------------------------------------------
-# HTTP response
+# Gradio UI
 # ---------------------------------------------------------
-
-def audio_response(
-    sample_rate,
-    audio,
-    backend,
-):
-
-    buffer = BytesIO()
-
-    sf.write(
-        buffer,
-        np.asarray(audio),
-        sample_rate,
-        format="WAV",
-        subtype="PCM_16",
-    )
-
-    buffer.seek(0)
-
-    return StreamingResponse(
-        buffer,
-        media_type="audio/wav",
-        headers={
-            "X-TTS-Backend": backend,
-            "X-TTS-Sample-Rate":
-                str(sample_rate),
-        },
-    )
-
-
-# ---------------------------------------------------------
-# API
-# ---------------------------------------------------------
-
-@app.get("/")
-def root():
-
-    return {
-        "service":
-            "stillpoint-kokoro-tts",
-
-        "model":
-            "hexgrad/Kokoro-82M",
-
-        "status":
-            "ok",
-    }
-
-
-@app.get("/health")
-def health():
-
-    return {
-        "status": "ok",
-        "quota": quota_status(),
-    }
-
-
-@app.post("/tts")
-def tts(
-    request: TTSRequest,
-    user=Depends(require_auth),
-):
-
-    sample_rate, audio, backend = synthesize(
-        request.text,
-        request.voice,
-        request.speed,
-    )
-
-    return audio_response(
-        sample_rate,
-        audio,
-        backend,
-    )
-
-
-# ---------------------------------------------------------
-# Gradio testing interface
-# ---------------------------------------------------------
-
-def gradio_generate(
-    text,
-    voice,
-    speed,
-):
-
-    if not text:
-        return None
-
-    sample_rate, audio, _ = synthesize(
-        text,
-        voice,
-        speed,
-    )
-
-    return (
-        sample_rate,
-        audio,
-    )
-
 
 with gr.Blocks(
-    title="StillPoint Kokoro TTS"
+    title="StillPoint Kokoro TTS",
 ) as demo:
 
     gr.Markdown(
@@ -282,6 +128,11 @@ with gr.Blocks(
         type="numpy",
     )
 
+    backend_label = gr.Textbox(
+        label="Backend",
+        interactive=False,
+    )
+
     button.click(
         fn=gradio_generate,
         inputs=[
@@ -289,28 +140,21 @@ with gr.Blocks(
             voice,
             speed,
         ],
-        outputs=output,
+        outputs=[
+            output,
+            backend_label,
+        ],
+        api_name="tts",
     )
-
-
-# Mount Gradio into FastAPI.
-
-app = gr.mount_gradio_app(
-    app,
-    demo,
-    path="/ui",
-)
 
 
 if __name__ == "__main__":
 
-    import os
-    import uvicorn
+    demo.queue()
 
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=int(
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=int(
             os.environ.get(
                 "PORT",
                 7860,
