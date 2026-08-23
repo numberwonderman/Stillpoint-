@@ -43,8 +43,7 @@ def gradio_generate(
             record_gpu_success()
 
             return (
-                sample_rate,
-                audio,
+                (sample_rate, audio),
                 "zerogpu",
             )
 
@@ -69,8 +68,7 @@ def gradio_generate(
     )
 
     return (
-        sample_rate,
-        audio,
+        (sample_rate, audio),
         "cpu",
     )
 
