@@ -8,7 +8,7 @@ import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
 import { useStreamingTTS } from "@/hooks/useStreamingTTS";
 import { KOKORO_VOICES } from "@/lib/kokoroVoices";
 import { tokenizeWithRanges as tokenizeText } from "@/lib/ttsTokens";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export default function MessageBubble({
   message,
@@ -31,8 +31,21 @@ export default function MessageBubble({
   // Active backend — prefer Kokoro streaming when the service URL is
   // configured and the AudioContext is available.
   const useStreaming = !!streaming.supported;
-  const activeBackend = useStreaming ? "kokoro-stream" : "browser";
+  const [isFallbackActive, setIsFallbackActive] = useState(false);
+  const useStreamingBackend = useStreaming && !isFallbackActive;
+  const activeBackend = useStreamingBackend ? "kokoro-stream" : "browser";
 
+  // Get methods from browser hook
+  const {
+    speak: speakBrowser,
+    pause: pauseBrowser,
+    resume: resumeBrowser,
+    cancel: cancelBrowser,
+  } = speech;
+
+  // Active state based on current backend
+  const activeState = useStreamingBackend ? streaming : speech;
+  
   const {
     supported,
     speaking,
@@ -44,17 +57,13 @@ export default function MessageBubble({
     setRate,
     setPitch,
     setVoiceURI,
-    speak: speakBrowser,
-    pause: pauseBrowser,
-    resume: resumeBrowser,
-    cancel: cancelBrowser,
-  } = speech;
+  } = activeState;
 
-  const speak = useStreaming ? streaming.speak : speakBrowser;
-  const pause = useStreaming ? streaming.pause : pauseBrowser;
-  const resume = useStreaming ? streaming.resume : resumeBrowser;
-  const cancel = useStreaming ? streaming.cancel : cancelBrowser;
-  const activeVoices = useStreaming ? KOKORO_VOICES : speech.voices;
+  const speak = useStreamingBackend ? streaming.speak : speakBrowser;
+  const pause = useStreamingBackend ? streaming.pause : pauseBrowser;
+  const resume = useStreamingBackend ? streaming.resume : resumeBrowser;
+  const cancel = useStreamingBackend ? streaming.cancel : cancelBrowser;
+  const activeVoices = useStreamingBackend ? KOKORO_VOICES : speech.voices;
 
   // Auto-fallback: if the streaming backend reports a new error for
   // this message, hand off to the browser hook once. The badge flips
@@ -68,6 +77,9 @@ export default function MessageBubble({
     if (!text) return;
     if (lastAutoFallbackTextRef.current === text) return;
     lastAutoFallbackTextRef.current = text;
+    
+    setIsFallbackActive(true);
+
     // Hand the text to the browser hook and stop the streaming one.
     try {
       streaming.cancel();

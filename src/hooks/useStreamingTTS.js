@@ -96,9 +96,11 @@ class MultipartParser {
 
   _indexOf(pattern) {
     const view = this.buffer;
+    const isString = typeof pattern === "string";
     outer: for (let i = 0; i <= view.length - pattern.length; i++) {
       for (let j = 0; j < pattern.length; j++) {
-        if (view[i + j] !== pattern[j]) continue outer;
+        const p = isString ? pattern.charCodeAt(j) : pattern[j];
+        if (view[i + j] !== p) continue outer;
       }
       return i;
     }

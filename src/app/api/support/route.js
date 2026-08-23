@@ -178,12 +178,22 @@ export async function POST(request) {
         try {
           // 7a. Stream conversational response.
           for await (const textChunk of streamResult.textStream) {
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ text: textChunk })}\n\n`
-              )
-            );
+            if (request.signal.aborted) break;
+            try {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ text: textChunk })}\n\n`
+                )
+              );
+            } catch (err) {
+              if (err.name === 'TypeError' && err.message.includes('closed')) {
+                break;
+              }
+              throw err;
+            }
           }
+
+          if (request.signal.aborted) return;
 
           // 7b. Decide whether external resources are needed.
           const { needsResources, resourceQuery } =
@@ -192,6 +202,8 @@ export async function POST(request) {
               recentContext,
               fallbackQuery: trimmed,
             });
+
+          if (request.signal.aborted) return;
 
           // 7c. Fetch + rank + stream resources.
           await fetchAndStreamResources({
@@ -204,20 +216,28 @@ export async function POST(request) {
             country,
           });
 
+          if (request.signal.aborted) return;
+
           // 7d. End SSE stream.
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          try {
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          } catch (e) {}
         } catch (error) {
           console.error("[Support Stream] Error:", error);
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                error: "Cloud response failed unexpectedly.",
-              })}\n\n`
-            )
-          );
+          try {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  error: "Cloud response failed unexpectedly.",
+                })}\n\n`
+              )
+            );
+          } catch (e) {}
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch (e) {}
         }
       },
     });
