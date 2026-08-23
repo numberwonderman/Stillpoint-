@@ -8,3 +8,5 @@ uvicorn
 numpy
 soundfile
 torch>=2.8
+pesq
+scipy

@@ -1,6 +1,7 @@
 import os
 
 import gradio as gr
+import numpy as np
 
 from quota import (
     gpu_available_for_attempt,
@@ -12,6 +13,8 @@ from tts import (
     generate_cpu,
     generate_gpu,
 )
+
+from benchmark import run_benchmark, SAMPLE_RATE as BENCH_SAMPLE_RATE
 
 import uvicorn
 
@@ -76,6 +79,63 @@ def gradio_generate(
 
 
 # ---------------------------------------------------------
+# Benchmark wrapper
+# ---------------------------------------------------------
+
+def gradio_benchmark(text, voice, speed):
+    """
+    Run the CPU precision benchmark and return:
+      - A list-of-dicts for the results DataFrame
+      - Three (sample_rate, audio) tuples for the audio players
+      - A markdown summary string
+    """
+    if not text or not text.strip():
+        raise gr.Error("Text cannot be empty.")
+
+    results = run_benchmark(text.strip(), voice, speed)
+
+    # --- build the display table (drop the private _audio key) ---
+    table_rows = []
+    for r in results:
+        table_rows.append({
+            "Precision":     r["Precision"],
+            "Time (s)":      r["Time (s)"],
+            "Speedup":       r.get("Speedup", "—"),
+            "Peak ΔRAM (MB)": r["Peak ΔRAM (MB)"],
+            "SNR (dB)":      r["SNR (dB)"],
+            "PESQ":          r["PESQ"],
+        })
+
+    # --- extract audio (returns None when the run failed) ---
+    def _to_gr_audio(audio_arr):
+        if audio_arr is None:
+            return None
+        # Gradio numpy audio expects (sample_rate, ndarray)
+        return (BENCH_SAMPLE_RATE, audio_arr)
+
+    audio_map = {r["Precision"]: r["_audio"] for r in results}
+    fp32_audio = _to_gr_audio(audio_map.get("FP32"))
+    bf16_audio = _to_gr_audio(audio_map.get("BF16"))
+    int8_audio = _to_gr_audio(audio_map.get("INT8"))
+
+    # --- markdown summary ---
+    lines = ["### Benchmark Summary\n"]
+    for r in results:
+        t    = r["Time (s)"]
+        spd  = r.get("Speedup", "—")
+        snr  = r["SNR (dB)"]
+        pesq = r["PESQ"]
+        lines.append(
+            f"**{r['Precision']}** — "
+            f"{t}s · {spd} vs FP32 · "
+            f"SNR {snr} dB · PESQ {pesq}"
+        )
+    summary_md = "  \n".join(lines)
+
+    return table_rows, fp32_audio, bf16_audio, int8_audio, summary_md
+
+
+# ---------------------------------------------------------
 # Gradio UI
 # ---------------------------------------------------------
 
@@ -92,61 +152,167 @@ with gr.Blocks(
         """
     )
 
-    text = gr.Textbox(
-        label="Text",
-        lines=5,
-        value="Hello from StillPoint.",
-    )
+    # ---- Tab 1: standard TTS UI ----
+    with gr.Tab("🎤 Generate"):
 
-    voice = gr.Dropdown(
-        choices=[
-            "af_heart",
-            "af_bella",
-            "af_nicole",
-            "am_michael",
-            "bf_emma",
-            "bm_george",
-        ],
-        value="af_heart",
-        label="Voice",
-    )
+        text = gr.Textbox(
+            label="Text",
+            lines=5,
+            value="Hello from StillPoint.",
+        )
 
-    speed = gr.Slider(
-        minimum=0.5,
-        maximum=2.0,
-        value=1.0,
-        step=0.05,
-        label="Speed",
-    )
+        voice = gr.Dropdown(
+            choices=[
+                "af_heart",
+                "af_bella",
+                "af_nicole",
+                "am_michael",
+                "bf_emma",
+                "bm_george",
+            ],
+            value="af_heart",
+            label="Voice",
+        )
 
-    button = gr.Button(
-        "Generate",
-        variant="primary",
-    )
+        speed = gr.Slider(
+            minimum=0.5,
+            maximum=2.0,
+            value=1.0,
+            step=0.05,
+            label="Speed",
+        )
 
-    output = gr.Audio(
-        label="Output",
-        type="numpy",
-    )
+        button = gr.Button(
+            "Generate",
+            variant="primary",
+        )
 
-    backend_label = gr.Textbox(
-        label="Backend",
-        interactive=False,
-    )
+        output = gr.Audio(
+            label="Output",
+            type="numpy",
+        )
 
-    button.click(
-        fn=gradio_generate,
-        inputs=[
-            text,
-            voice,
-            speed,
-        ],
-        outputs=[
-            output,
-            backend_label,
-        ],
-        api_name="tts",
-    )
+        backend_label = gr.Textbox(
+            label="Backend",
+            interactive=False,
+        )
+
+        button.click(
+            fn=gradio_generate,
+            inputs=[
+                text,
+                voice,
+                speed,
+            ],
+            outputs=[
+                output,
+                backend_label,
+            ],
+            api_name="tts",
+        )
+
+    # ---- Tab 2: CPU precision benchmark ----
+    with gr.Tab("⚡ Benchmark"):
+
+        gr.Markdown(
+            """
+            ## CPU Precision Benchmark
+
+            Runs **FP32**, **BF16**, and **INT8** on the CPU and compares
+            speed, memory usage, and audio quality against the FP32 reference.
+
+            | Mode | Description |
+            |------|-------------|
+            | FP32 | Default float32 — current production mode |
+            | BF16 | Weights cast to bfloat16 (AVX-512 BF16 on modern Intel/AMD CPUs) |
+            | INT8 | `torch.quantization.quantize_dynamic` on all `nn.Linear` layers |
+
+            > **Note**: First run will take longer while the three pipelines are built and cached.
+            """
+        )
+
+        with gr.Row():
+            bench_text = gr.Textbox(
+                label="Text",
+                lines=3,
+                value="The quick brown fox jumps over the lazy dog near the riverbank.",
+                scale=3,
+            )
+
+        with gr.Row():
+            bench_voice = gr.Dropdown(
+                choices=[
+                    "af_heart",
+                    "af_bella",
+                    "af_nicole",
+                    "am_michael",
+                    "bf_emma",
+                    "bm_george",
+                ],
+                value="af_heart",
+                label="Voice",
+                scale=2,
+            )
+            bench_speed = gr.Slider(
+                minimum=0.5,
+                maximum=2.0,
+                value=1.0,
+                step=0.05,
+                label="Speed",
+                scale=2,
+            )
+
+        bench_button = gr.Button(
+            "▶️  Run Benchmark",
+            variant="primary",
+        )
+
+        bench_table = gr.DataFrame(
+            label="Results",
+            headers=[
+                "Precision",
+                "Time (s)",
+                "Speedup",
+                "Peak ΔRAM (MB)",
+                "SNR (dB)",
+                "PESQ",
+            ],
+        )
+
+        bench_summary = gr.Markdown(label="Summary")
+
+        gr.Markdown("### Audio Outputs (listen & compare)")
+
+        with gr.Row():
+            bench_fp32_audio = gr.Audio(
+                label="FP32 (reference)",
+                type="numpy",
+            )
+            bench_bf16_audio = gr.Audio(
+                label="BF16",
+                type="numpy",
+            )
+            bench_int8_audio = gr.Audio(
+                label="INT8",
+                type="numpy",
+            )
+
+        bench_button.click(
+            fn=gradio_benchmark,
+            inputs=[
+                bench_text,
+                bench_voice,
+                bench_speed,
+            ],
+            outputs=[
+                bench_table,
+                bench_fp32_audio,
+                bench_bf16_audio,
+                bench_int8_audio,
+                bench_summary,
+            ],
+            api_name="benchmark",
+        )
 
 
 # ---------------------------------------------------------
