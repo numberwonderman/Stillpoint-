@@ -1,0 +1,32 @@
+name: Deploy Kokoro TTS Model to Hugging Face
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/kokoro/**"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Kokoro Space
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Deploy to Hugging Face Space
+        uses: huggingface/hub-sync@v0.1.0
+        with:
+          github_repo_id: ${{ github.repository }}
+          huggingface_repo_id: ${{secrets.HF_USERNAME}}/${{secrets.HF_SPACE_NAME}}
+          hf_token: ${{ secrets.HF_TOKEN }}
+          repo_type: space
+          space_sdk: gradio
+          subdirectory: services/kokoro

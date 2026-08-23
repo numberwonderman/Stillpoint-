@@ -28,7 +28,6 @@ const jwtSecret = process.env.JWT_SECRET;
 const token = jwt.sign({ sub: 'test-user', email: 'test@example.com' }, jwtSecret, { expiresIn: '1h' });
 const cookieString = `stillpoint_session=${token}`;
 const API_URL = 'http://localhost:3000/api/support';
-
 async function testResource() {
   const response = await fetch(API_URL, {
     method: 'POST',

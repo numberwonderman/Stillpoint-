@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import ThinkingIndicator from "./ThinkingIndicator";
 import Markdown from "./Markdown";
+import ResourceCard from "./ResourceCard";
 
 /**
  * ResponseSection — the live region.
@@ -228,7 +229,7 @@ const SEVERITY_COPY = {
   },
 };
 
-export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion, onAcknowledge }) {
+export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion, onAcknowledge, resources }) {
   const [copied, setCopied] = useState(false);
   // Default to "elevated" if the server didn't pass severity (older
   // clients, partial responses). The panel still works — it just
@@ -313,13 +314,23 @@ export function CrisisPanel({ severity, localAIStopped, region, onChooseRegion, 
           </div>
         )}
 
-        {!region ? (
-          <RegionChooser onChoose={onChooseRegion} />
+        {Array.isArray(resources) && resources.length > 0 ? (
+          <div className="mb-5 flex flex-col gap-2.5">
+            {resources.map((res, i) => (
+              <ResourceCard key={i} resource={res} />
+            ))}
+          </div>
         ) : (
-          <PrimaryResource region={region} severity={tier} />
-        )}
+          <>
+            {!region ? (
+              <RegionChooser onChoose={onChooseRegion} />
+            ) : (
+              <PrimaryResource region={region} severity={tier} />
+            )}
 
-        <HelplineList region={region} severity={tier} />
+            <HelplineList region={region} severity={tier} />
+          </>
+        )}
 
         <DetailsDisclosure region={region} onSwitchRegion={onChooseRegion} onCopy={copyResources} copied={copied} />
 

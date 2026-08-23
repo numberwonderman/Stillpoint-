@@ -89,6 +89,7 @@ export default function MessageBubble({
             region={crisisRegion}
             onChooseRegion={onChooseCrisisRegion}
             onAcknowledge={onAcknowledgeCrisis}
+            resources={resources}
           />
         </div>
       </div>

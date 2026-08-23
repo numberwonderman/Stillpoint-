@@ -27,6 +27,7 @@ function getSecret() {
 /** Signs a JWT for the given user id/email. */
 export function signAuthToken({ userId, email }) {
   return jwt.sign({ sub: userId, email }, getSecret(), {
+    algorithm: "HS256",
     expiresIn: TOKEN_TTL_SECONDS,
   });
 }

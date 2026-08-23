@@ -36,3 +36,9 @@ pnpm-debug.log*
 .env*
 
 tests
+
+
+.env
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,10 @@
+gradio>=4,<7
+spaces
+kokoro>=0.9
+misaki[en]
+PyJWT
+fastapi
+uvicorn
+numpy
+soundfile
+torch>=2.8
