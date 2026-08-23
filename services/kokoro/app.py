@@ -13,6 +13,8 @@ from tts import (
     generate_gpu,
 )
 
+import uvicorn
+
 
 # ---------------------------------------------------------
 # Gradio inference wrapper
@@ -162,24 +164,37 @@ if __name__ == "__main__":
         )
     )
 
+    combined_app = None
+
     try:
 
         # Mount the streaming FastAPI under the same Gradio
         # server so a single deploy serves both surfaces.
+        # `mount_gradio_app` returns a FastAPI/Starlette app;
+        # we serve THAT with uvicorn. Calling `demo.launch()`
+        # after mounting would try to start a second HTTP
+        # server on the same port and crash with
+        # "port already in use".
         from stream_api import mount_into
 
-        combined = mount_into(demo)
-
-        combined.launch(
-            server_name="0.0.0.0",
-            server_port=port,
-        )
+        combined_app = mount_into(demo)
 
     except Exception as exc:
 
         print(
             f"[startup] streaming API disabled: {exc}"
         )
+
+    if combined_app is not None:
+
+        uvicorn.run(
+            combined_app,
+            host="0.0.0.0",
+            port=port,
+            log_level="info",
+        )
+
+    else:
 
         demo.launch(
             server_name="0.0.0.0",

@@ -187,6 +187,20 @@ def mount_into(gradio_app):
     """
     Gradio's `mount_gradio_app` lets us combine a Gradio
     surface and a FastAPI surface on the same HTTP server.
+
+    IMPORTANT: in Gradio 6, the SSR mode (default ON) spins
+    up a separate Node.js SvelteKit server. That server
+    intercepts unknown paths and returns the SvelteKit page
+    shell with `Allow: GET`, which is what we saw as a 405
+    on POST /v1/tts/stream. Setting `ssr_mode=False` makes
+    Gradio serve pure client-side HTML from the Python
+    server and stops the Node proxy from intercepting our
+    streaming endpoint.
+
+    The parent's FastAPI routes (like @app.post("/v1/tts/stream"))
+    take precedence over the mounted Gradio sub-app, so the
+    streaming endpoint stays reachable at the URL the frontend
+    already uses.
     """
 
     try:
@@ -203,6 +217,7 @@ def mount_into(gradio_app):
         app,
         gradio_app,
         path="/",
+        ssr_mode=False,
     )
 
 
