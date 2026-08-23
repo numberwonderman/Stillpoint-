@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { tokenizeWithRanges as tokenizeText } from "@/lib/ttsTokens";
 
 export function useSpeechSynthesis({
   lang = "en-US",
@@ -64,27 +65,6 @@ export function useSpeechSynthesis({
     return byLangPrefix || voices[0] || null;
   }, [voices, voiceURI, lang]);
 
-  const tokenizeWithRanges = useCallback((text) => {
-    const re = /([A-Za-z0-9'\-]+)|([^A-Za-z0-9'\-]+)/g;
-    const tokens = [];
-    let wordCount = 0;
-    let m;
-    while ((m = re.exec(text || "")) !== null) {
-      const startChar = m.index;
-      const endChar = m.index + m[0].length;
-      const isWord = Boolean(m[1]);
-      tokens.push({
-        type: isWord ? "word" : "sep",
-        text: m[0],
-        startChar,
-        endChar,
-        wordIndex: isWord ? wordCount : -1,
-      });
-      if (isWord) wordCount++;
-    }
-    return tokens;
-  }, []);
-
   const clearTimers = useCallback(() => {
     if (fallbackTimerRef.current) {
       clearInterval(fallbackTimerRef.current);
@@ -102,7 +82,7 @@ export function useSpeechSynthesis({
       } catch (_) {}
 
       fullTextRef.current = text;
-      const tokensWithRanges = tokenizeWithRanges(text);
+      const tokensWithRanges = tokenizeText(text);
       setWordTokens(tokensWithRanges);
 
       const wordTokensList = tokensWithRanges.filter((t) => t.type === "word");
@@ -184,7 +164,7 @@ export function useSpeechSynthesis({
         }
       }, 100);
     },
-    [supported, lang, rate, pitch, volume, pickVoice, tokenizeWithRanges, clearTimers]
+    [supported, lang, rate, pitch, volume, pickVoice, tokenizeText, clearTimers]
   );
 
   const pause = useCallback(() => {

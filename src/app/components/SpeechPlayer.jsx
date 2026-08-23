@@ -18,6 +18,7 @@ export default function SpeechPlayer({
   pause,
   resume,
   cancel,
+  backend = "browser",
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [popoverPlacement, setPopoverPlacement] = useState("up"); // "up" | "down"
@@ -181,10 +182,23 @@ export default function SpeechPlayer({
 
                 <div className="mb-3">
                   <div className="mb-1 flex items-center justify-between">
-                    <label htmlFor="tts-pitch" className="text-[0.72rem] font-semibold text-text-muted">
+                    <label
+                      htmlFor="tts-pitch"
+                      className={`text-[0.72rem] font-semibold ${
+                        backend === "kokoro-stream"
+                          ? "text-text-muted/40"
+                          : "text-text-muted"
+                      }`}
+                    >
                       Pitch
                     </label>
-                    <span className="text-[0.7rem] font-mono text-text-muted/80">
+                    <span
+                      className={`text-[0.7rem] font-mono ${
+                        backend === "kokoro-stream"
+                          ? "text-text-muted/40"
+                          : "text-text-muted/80"
+                      }`}
+                    >
                       {pitch.toFixed(2)}
                     </span>
                   </div>
@@ -195,9 +209,19 @@ export default function SpeechPlayer({
                     max="1.75"
                     step="0.05"
                     value={pitch}
+                    disabled={backend === "kokoro-stream"}
                     onChange={(e) => onChangePitch?.(parseFloat(e.target.value))}
-                    className="w-full accent-accent cursor-pointer"
+                    className={`w-full accent-accent ${
+                      backend === "kokoro-stream"
+                        ? "cursor-not-allowed opacity-40"
+                        : "cursor-pointer"
+                    }`}
                   />
+                  {backend === "kokoro-stream" && (
+                    <p className="mt-0.5 text-[0.65rem] leading-snug text-text-muted/60 italic">
+                      Pitch is fixed by the Kokoro voice.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -233,6 +257,9 @@ export default function SpeechPlayer({
           <span className="ml-1 inline-flex items-center gap-1 text-text-muted">
             <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
             <span className="text-[0.7rem]">Reading…</span>
+            <span className="text-[0.65rem] uppercase tracking-wider font-bold border border-border/40 rounded px-1.5 py-[1px] text-text-muted/70">
+              {backend === "kokoro-stream" ? "Kokoro" : "Browser"}
+            </span>
           </span>
         )}
       </div>

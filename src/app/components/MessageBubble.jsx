@@ -5,7 +5,10 @@ import SpeechPlayer from "./SpeechPlayer";
 import ResourceCard from "./ResourceCard";
 import Markdown from "./Markdown";
 import { useSpeechSynthesis } from "@/hooks/useSpeechSynthesis";
-import { useMemo } from "react";
+import { useStreamingTTS } from "@/hooks/useStreamingTTS";
+import { KOKORO_VOICES } from "@/lib/kokoroVoices";
+import { tokenizeWithRanges as tokenizeText } from "@/lib/ttsTokens";
+import { useEffect, useMemo, useRef } from "react";
 
 export default function MessageBubble({
   message,
@@ -18,34 +21,69 @@ export default function MessageBubble({
 
   // Hooks must run unconditionally for every render — keep them above
   // any role-based early returns.
+  const speech = useSpeechSynthesis({ lang: browserLang });
+  const streaming = useStreamingTTS({
+    baseUrl: process.env.NEXT_PUBLIC_KOKORO_URL || "",
+    voice: "af_heart",
+    lang: browserLang,
+  });
+
+  // Active backend — prefer Kokoro streaming when the service URL is
+  // configured and the AudioContext is available.
+  const useStreaming = !!streaming.supported;
+  const activeBackend = useStreaming ? "kokoro-stream" : "browser";
+
   const {
     supported,
     speaking,
     paused,
     wordIndex,
-    voices,
     rate,
     pitch,
     voiceURI,
     setRate,
     setPitch,
     setVoiceURI,
-    speak,
-    pause,
-    resume,
-    cancel,
-  } = useSpeechSynthesis({ lang: browserLang });
+    speak: speakBrowser,
+    pause: pauseBrowser,
+    resume: resumeBrowser,
+    cancel: cancelBrowser,
+  } = speech;
+
+  const speak = useStreaming ? streaming.speak : speakBrowser;
+  const pause = useStreaming ? streaming.pause : pauseBrowser;
+  const resume = useStreaming ? streaming.resume : resumeBrowser;
+  const cancel = useStreaming ? streaming.cancel : cancelBrowser;
+  const activeVoices = useStreaming ? KOKORO_VOICES : speech.voices;
+
+  // Auto-fallback: if the streaming backend reports a new error for
+  // this message, hand off to the browser hook once. The badge flips
+  // on the next Listen click (because `streaming.error` stays set
+  // until `streaming.cancel()` resets it; we explicitly clear it
+  // here so the next attempt can try Kokoro again).
+  const lastAutoFallbackTextRef = useRef("");
+  useEffect(() => {
+    if (!useStreaming) return;
+    if (!streaming.error) return;
+    if (!text) return;
+    if (lastAutoFallbackTextRef.current === text) return;
+    lastAutoFallbackTextRef.current = text;
+    // Hand the text to the browser hook and stop the streaming one.
+    try {
+      streaming.cancel();
+    } catch (_) {}
+    try {
+      speakBrowser(text);
+    } catch (_) {}
+  }, [streaming.error, text, useStreaming, streaming, speakBrowser]);
 
   // Mirror the static text into word/separator tokens for highlighting.
   const displayTokens = useMemo(() => {
     if (!speaking) return null;
-    const re = /([A-Za-z0-9'\\-]+)|([^A-Za-z0-9'\\-]+)/g;
-    const out = [];
-    let m;
-    while ((m = re.exec(text || "")) !== null) {
-      out.push({ type: m[1] ? "word" : "sep", text: m[0] });
-    }
-    return out;
+    return tokenizeText(text || "").map(({ type, text: tok }) => ({
+      type: type === "word" ? "word" : "sep",
+      text: tok,
+    }));
   }, [text, speaking]);
 
   // Number of "word" tokens that have already been spoken.
@@ -156,7 +194,7 @@ export default function MessageBubble({
                 supported={supported}
                 speaking={speaking}
                 paused={paused}
-                voices={voices}
+                voices={activeVoices}
                 rate={rate}
                 pitch={pitch}
                 voiceURI={voiceURI}
@@ -167,6 +205,7 @@ export default function MessageBubble({
                 pause={pause}
                 resume={resume}
                 cancel={cancel}
+                backend={activeBackend}
               />
             )}
 
