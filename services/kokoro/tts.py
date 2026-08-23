@@ -83,6 +83,64 @@ def estimate_gpu_duration(
 
 
 # ---------------------------------------------------------
+# Chunk helpers
+# ---------------------------------------------------------
+
+def _to_numpy(audio) -> np.ndarray:
+
+    if audio is None:
+        return None
+
+    if hasattr(audio, "cpu"):
+        audio = audio.cpu()
+
+    if hasattr(audio, "numpy"):
+        audio = audio.numpy()
+
+    return np.asarray(audio, dtype=np.float32).reshape(-1)
+
+
+def _chunk_bytes(
+    audio: np.ndarray,
+    sample_rate: int,
+) -> bytes:
+
+    """
+    Encode a single Kokoro audio chunk as a WAV payload
+    (24 kHz, mono, 16-bit PCM). The chunk length is encoded
+    in the WAV header so the frontend can decode each blob
+    independently as it streams in.
+    """
+
+    # Clip to [-1, 1] before quantising to int16 to avoid wrap.
+    clipped = np.clip(audio, -1.0, 1.0)
+    pcm = (clipped * 32767.0).astype(np.int16)
+
+    byte_rate = sample_rate * 2  # mono, 16-bit
+    block_align = 2
+    data_size = pcm.nbytes
+
+    # RIFF / WAV header.
+    header = (
+        b"RIFF"
+        + (36 + data_size).to_bytes(4, "little")
+        + b"WAVE"
+        + b"fmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")     # PCM
+        + (1).to_bytes(2, "little")     # mono
+        + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little")
+        + block_align.to_bytes(2, "little")
+        + (16).to_bytes(2, "little")    # bits per sample
+        + b"data"
+        + data_size.to_bytes(4, "little")
+    )
+
+    return header + pcm.tobytes()
+
+
+# ---------------------------------------------------------
 # CPU
 # ---------------------------------------------------------
 
@@ -102,14 +160,12 @@ def generate_cpu(
         speed=speed,
     ):
 
-        if audio is None:
+        chunk = _to_numpy(audio)
+
+        if chunk is None or chunk.size == 0:
             continue
 
-        chunks.append(
-            audio.numpy()
-            if hasattr(audio, "numpy")
-            else np.asarray(audio)
-        )
+        chunks.append(chunk)
 
     if not chunks:
         raise RuntimeError("Kokoro produced no audio.")
@@ -125,6 +181,45 @@ def generate_cpu(
     )
 
     return SAMPLE_RATE, audio
+
+
+def stream_cpu(
+    text: str,
+    voice: str,
+    speed: float,
+):
+
+    """
+    Generator that yields WAV-encoded audio chunks as
+    Kokoro produces them on the CPU pipeline.
+    """
+
+    started = time.perf_counter()
+    yielded = 0
+
+    for _, _, audio in CPU_PIPELINE(
+        text,
+        voice=voice,
+        speed=speed,
+    ):
+
+        chunk = _to_numpy(audio)
+
+        if chunk is None or chunk.size == 0:
+            continue
+
+        payload = _chunk_bytes(chunk, SAMPLE_RATE)
+        yielded += 1
+        yield payload
+
+    elapsed = time.perf_counter() - started
+
+    print(
+        f"[CPU stream] "
+        f"{len(text)} chars "
+        f"in {elapsed:.2f}s "
+        f"({yielded} chunks)"
+    )
 
 
 # ---------------------------------------------------------
@@ -150,14 +245,12 @@ def generate_gpu(
         speed=speed,
     ):
 
-        if audio is None:
+        chunk = _to_numpy(audio)
+
+        if chunk is None or chunk.size == 0:
             continue
 
-        chunks.append(
-            audio.cpu().numpy()
-            if hasattr(audio, "cpu")
-            else np.asarray(audio)
-        )
+        chunks.append(chunk)
 
     if not chunks:
         raise RuntimeError("Kokoro produced no audio.")
@@ -173,3 +266,45 @@ def generate_gpu(
     )
 
     return SAMPLE_RATE, audio
+
+
+@spaces.GPU(
+    duration=estimate_gpu_duration
+)
+def stream_gpu(
+    text: str,
+    voice: str,
+    speed: float,
+):
+
+    """
+    Generator that yields WAV-encoded audio chunks as
+    Kokoro produces them on the ZeroGPU pipeline.
+    """
+
+    started = time.perf_counter()
+    yielded = 0
+
+    for _, _, audio in GPU_PIPELINE(
+        text,
+        voice=voice,
+        speed=speed,
+    ):
+
+        chunk = _to_numpy(audio)
+
+        if chunk is None or chunk.size == 0:
+            continue
+
+        payload = _chunk_bytes(chunk, SAMPLE_RATE)
+        yielded += 1
+        yield payload
+
+    elapsed = time.perf_counter() - started
+
+    print(
+        f"[GPU stream] "
+        f"{len(text)} chars "
+        f"in {elapsed:.2f}s "
+        f"({yielded} chunks)"
+    )

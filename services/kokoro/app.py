@@ -86,6 +86,7 @@ with gr.Blocks(
         # StillPoint Kokoro TTS
 
         Kokoro-82M with ZeroGPU → CPU fallback.
+        Streaming JSON API lives at `/v1/tts/stream`.
         """
     )
 
@@ -146,16 +147,41 @@ with gr.Blocks(
     )
 
 
+# ---------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------
+
 if __name__ == "__main__":
 
     demo.queue()
 
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=int(
-            os.environ.get(
-                "PORT",
-                7860,
-            )
-        ),
+    port = int(
+        os.environ.get(
+            "PORT",
+            7860,
+        )
     )
+
+    try:
+
+        # Mount the streaming FastAPI under the same Gradio
+        # server so a single deploy serves both surfaces.
+        from stream_api import mount_into
+
+        combined = mount_into(demo)
+
+        combined.launch(
+            server_name="0.0.0.0",
+            server_port=port,
+        )
+
+    except Exception as exc:
+
+        print(
+            f"[startup] streaming API disabled: {exc}"
+        )
+
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=port,
+        )
