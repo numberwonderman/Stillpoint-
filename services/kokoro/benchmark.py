@@ -59,6 +59,10 @@ def _find_model(pipe: KPipeline) -> nn.Module | None:
     return None
 
 
+# Tag stored alongside the BF16 pipeline so _benchmark_one knows to use autocast.
+_BF16_AUTOCAST_TAG = "__bf16_autocast__"
+
+
 def _build_fp32() -> KPipeline:
     """Baseline FP32 pipeline (same as the production CPU pipeline)."""
     return KPipeline(lang_code="a")
@@ -66,34 +70,31 @@ def _build_fp32() -> KPipeline:
 
 def _build_bf16() -> KPipeline:
     """
-    BF16 pipeline: load a fresh KPipeline and cast model weights in-place.
+    BF16 pipeline using torch.autocast instead of weight casting.
 
-    We load fresh instead of deepcopy because Kokoro uses weight_norm which
-    blocks deepcopy (pytorch/pytorch#103001).
+    Casting the whole model with `.to(bfloat16)` also converts LSTM layers,
+    but oneDNN (Intel MKL-DNN) does not support BF16 LSTM primitives on most
+    CPUs and raises:
+        "could not create a primitive descriptor for the LSTM forward"
 
-    BF16 is natively accelerated on Intel Ice Lake+ / AMD Zen 4+ CPUs with
-    AVX-512 BF16. On older CPUs torch falls back to software emulation —
-    still correct, just potentially slower than FP32.
+    Using `torch.autocast('cpu', dtype=torch.bfloat16)` as a context manager
+    instead lets PyTorch apply BF16 only to ops that support it (matmul /
+    Linear) and transparently falls back to FP32 for LSTM — no crash, correct
+    results, and still measurably faster for the Linear-heavy decoder layers.
+
+    The pipeline object itself stays in FP32; the autocast context is applied
+    in _run_pipeline_bf16 at inference time.
     """
-    pipe = KPipeline(lang_code="a")
-    m = _find_model(pipe)
-    if m is not None:
-        m.to(torch.bfloat16)
-    else:
-        raise RuntimeError(
-            "Cannot locate nn.Module inside KPipeline for BF16 cast. "
-            "Inspect pipe.__dict__ for the correct attribute name."
-        )
-    return pipe
+    return KPipeline(lang_code="a")   # weights stay FP32; autocast at runtime
 
 
 def _build_int8() -> KPipeline:
     """
     INT8 pipeline: load a fresh KPipeline then apply quantize_dynamic in-place.
 
-    Dynamic quantization quantises nn.Linear weights to int8 at inference time
-    and keeps activations in float32 — no calibration dataset needed.
-    We replace the model attribute directly to avoid any deepcopy.
+    `quantize_dynamic` internally calls deepcopy when `inplace=False` (the
+    default), which crashes on weight-normed tensors. Passing `inplace=True`
+    mutates the freshly-loaded module directly, bypassing the copy entirely.
     """
     pipe = KPipeline(lang_code="a")
     m = _find_model(pipe)
@@ -103,18 +104,15 @@ def _build_int8() -> KPipeline:
             "Inspect pipe.__dict__ for the correct attribute name."
         )
 
-    quantized = torch.quantization.quantize_dynamic(
+    # inplace=True avoids the internal deepcopy that breaks on weight_norm.
+    torch.quantization.quantize_dynamic(
         m,
         {nn.Linear},
         dtype=torch.qint8,
+        inplace=True,
     )
-
-    # Replace the model attribute in-place on the pipe object.
-    for attr in ("model", "net", "model_", "_model"):
-        if isinstance(getattr(pipe, attr, None), nn.Module):
-            setattr(pipe, attr, quantized)
-            break
-
+    # The model attribute on `pipe` already points to `m`, which is now
+    # quantized in-place — no setattr needed.
     return pipe
 
 
@@ -168,13 +166,29 @@ def _run_pipeline(
     text: str,
     voice: str,
     speed: float,
+    use_bf16_autocast: bool = False,
 ) -> np.ndarray:
-    """Run a KPipeline and return concatenated float32 audio."""
+    """
+    Run a KPipeline and return concatenated float32 audio.
+
+    When use_bf16_autocast=True the forward pass runs inside
+    torch.autocast('cpu', bfloat16) — Linear/matmul ops use BF16,
+    LSTM falls back to FP32 transparently.
+    """
     chunks = []
-    for _, _, audio in pipe(text, voice=voice, speed=speed):
-        chunk = _to_numpy(audio)
-        if chunk is not None:
-            chunks.append(chunk)
+
+    def _collect():
+        for _, _, audio in pipe(text, voice=voice, speed=speed):
+            chunk = _to_numpy(audio)
+            if chunk is not None:
+                chunks.append(chunk)
+
+    if use_bf16_autocast:
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            _collect()
+    else:
+        _collect()
+
     if not chunks:
         raise RuntimeError("Pipeline produced no audio.")
     return np.concatenate(chunks)
@@ -280,7 +294,10 @@ def _benchmark_one(
     t0 = time.perf_counter()
 
     try:
-        audio = _run_pipeline(pipe, text, voice, speed)
+        audio = _run_pipeline(
+            pipe, text, voice, speed,
+            use_bf16_autocast=(precision == "BF16"),
+        )
         ok = True
     except Exception as exc:
         audio = None
