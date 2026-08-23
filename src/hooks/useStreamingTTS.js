@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_KOKORO_VOICE, KOKORO_VOICES } from "@/lib/kokoroVoices";
-import { countWords } from "@/lib/ttsTokens";
+import { countWords, tokenizeWithRanges } from "@/lib/ttsTokens";
 
 const BOUNDARY = "--stillpoint-tts-boundary--";
 const MIN_RATE = 0.5;
@@ -260,6 +260,7 @@ export function useStreamingTTS({
   // Latest spoken text — kept here so resume() can recompute the
   // highlight tick without re-reading state.
   const textRef = useRef("");
+  const tokensRef = useRef([]);
 
   // Approximate word duration: ~0.42s / rate per word. Cached so the
   // rAF tick is allocation-free.
@@ -337,8 +338,12 @@ export function useStreamingTTS({
       const tick = () => {
         const pb = playbackRef.current;
         const ctx = audioCtxRef.current;
+        const tokens = tokensRef.current || [];
+        const textLength = textRef.current?.length || 0;
+
         if (!pb || !ctx) return;
         if (pb.finished) return;
+
         const playing =
           pb.source && pb.startedAt > 0 && !pb.pausedRef?.value;
         let played = pb.durationPlayed;
@@ -346,11 +351,25 @@ export function useStreamingTTS({
           played += ctx.currentTime - pb.startedAt - pb.startedAtOffset;
           if (played < 0) played = 0;
         }
-        const perWord = wordDurationRef.current;
-        if (perWord > 0 && totalWords > 0) {
-          const idx = Math.min(totalWords - 1, Math.floor(played / perWord));
-          if (idx >= 0) setWordIndex(idx);
+
+        let estTotalDuration = wordDurationRef.current * totalWords;
+        if (pb.parserDone && pb.totalDuration > 0) {
+          estTotalDuration = pb.totalDuration;
         }
+
+        if (estTotalDuration > 0 && textLength > 0) {
+          const fraction = Math.min(1, played / estTotalDuration);
+          const charIdx = Math.floor(fraction * textLength);
+
+          const matchedToken = tokens.find(
+            (t) => t.type === "word" && charIdx >= t.startChar && charIdx < t.endChar + 3
+          );
+
+          if (matchedToken && matchedToken.wordIndex >= 0) {
+            setWordIndex((prev) => Math.max(prev, matchedToken.wordIndex));
+          }
+        }
+
         rafRef.current = requestAnimationFrame(tick);
       };
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
@@ -454,6 +473,7 @@ export function useStreamingTTS({
       if (!text) return;
 
       textRef.current = text;
+      tokensRef.current = tokenizeWithRanges(text);
 
       // Cancel anything in flight.
       tearDown();
