@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import torch
+import torch.nn as nn
 import spaces
 
 from kokoro import KPipeline
@@ -20,6 +21,22 @@ print("Loading Kokoro...")
 CPU_PIPELINE = KPipeline(
     lang_code="a",
 )
+
+# ----- FP32 Channels Last (default production optimisation) -----
+# MKL-DNN convolutions (which dominate Kokoro-82M) are significantly faster
+# in NHWC layout.  We cast the model weights once at startup; inference is
+# otherwise identical to vanilla FP32.
+_cpu_model = None
+for _attr in ("model", "net", "model_", "_model"):
+    _m = getattr(CPU_PIPELINE, _attr, None)
+    if isinstance(_m, nn.Module):
+        _m.to(memory_format=torch.channels_last)
+        _cpu_model = _m
+        break
+if _cpu_model is None:
+    print("[tts] WARNING: could not apply channels_last to CPU pipeline.")
+else:
+    print("[tts] CPU pipeline: channels_last applied.")
 
 print("CPU Kokoro loaded.")
 
@@ -144,6 +161,7 @@ def _chunk_bytes(
 # CPU
 # ---------------------------------------------------------
 
+@torch.inference_mode()
 def generate_cpu(
     text: str,
     voice: str,
@@ -183,12 +201,12 @@ def generate_cpu(
     return SAMPLE_RATE, audio
 
 
+@torch.inference_mode()
 def stream_cpu(
     text: str,
     voice: str,
     speed: float,
 ):
-
     """
     Generator that yields WAV-encoded audio chunks as
     Kokoro produces them on the CPU pipeline.

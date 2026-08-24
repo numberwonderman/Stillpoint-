@@ -38,7 +38,7 @@ from kokoro import KPipeline
 SAMPLE_RATE = 24_000          # Kokoro native sample rate
 PESQ_RATE   = 16_000          # PESQ wideband requires 16 kHz
 
-PRECISIONS = ["FP32", "FP32-CL", "BF16", "INT8"]
+PRECISIONS = ["FP32", "FP32-CL", "BF16", "INT8", "ONNX"]
 
 # ---------------------------------------------------------------------------
 # Internal pipeline cache
@@ -134,11 +134,63 @@ def _build_int8() -> KPipeline:
     return pipe
 
 
+# ---------------------------------------------------------------------------
+# ONNX Runtime pipeline wrapper
+# ---------------------------------------------------------------------------
+
+class _OnnxWrapper:
+    """
+    Thin wrapper around kokoro_onnx.Kokoro so the benchmarking machinery
+    can treat it the same as a KPipeline.
+
+    The kokoro-onnx library downloads the ONNX model automatically from
+    Hugging Face Hub on first run (cached in ~/.cache/huggingface).
+    """
+
+    def __init__(self):
+        from kokoro_onnx import Kokoro as KokoroOnnx
+        from huggingface_hub import hf_hub_download
+
+        # Download ONNX model + voice file (cached after first run).
+        onnx_path  = hf_hub_download(
+            repo_id="onnx-community/Kokoro-82M-v1.0-ONNX",
+            filename="onnx/model.onnx",
+        )
+        voices_path = hf_hub_download(
+            repo_id="onnx-community/Kokoro-82M-v1.0-ONNX",
+            filename="voices.bin",
+        )
+        self._kokoro = KokoroOnnx(onnx_path, voices_path)
+        print("[benchmark] ONNX pipeline ready.")
+
+    def generate(self, text: str, voice: str, speed: float) -> np.ndarray:
+        """Run full synthesis and return a float32 audio array."""
+        samples, sr = self._kokoro.create(
+            text,
+            voice=voice,
+            speed=speed,
+            lang="en-us",
+        )
+        return np.asarray(samples, dtype=np.float32).reshape(-1)
+
+
+def _build_onnx() -> _OnnxWrapper:
+    """
+    ONNX Runtime pipeline.
+
+    Uses the onnx-community/Kokoro-82M-v1.0-ONNX model from Hugging Face.
+    ONNX Runtime fuses Conv + BN, applies optimal memory layouts, and runs
+    the entire graph through optimised C++ kernels — typically 2-4× faster
+    than vanilla PyTorch on CPU for convolution-heavy models.
+    """
+    return _OnnxWrapper()
+
+
 def _ensure_pipelines() -> None:
     """Populate the pipeline cache if not already done."""
-    # Only skip if all three loaded successfully as KPipeline instances.
-    # A partial or errored cache (e.g. from a previous crash) will be rebuilt.
-    if all(isinstance(_BENCH_CACHE.get(p), KPipeline) for p in PRECISIONS):
+    # Only skip if every precision is loaded as a live object (not an error str).
+    if all(not isinstance(_BENCH_CACHE.get(p), str) and _BENCH_CACHE.get(p) is not None
+           for p in PRECISIONS):
         return
 
     print("[benchmark] building FP32 pipeline …")
@@ -166,6 +218,12 @@ def _ensure_pipelines() -> None:
         _BENCH_CACHE["INT8"] = _build_int8()
     except Exception as exc:
         _BENCH_CACHE["INT8"] = f"LOAD ERROR: {exc}"
+
+    print("[benchmark] building ONNX pipeline …")
+    try:
+        _BENCH_CACHE["ONNX"] = _build_onnx()
+    except Exception as exc:
+        _BENCH_CACHE["ONNX"] = f"LOAD ERROR: {exc}"
 
     print("[benchmark] all pipelines ready.")
 
@@ -218,9 +276,17 @@ def _run_pipeline(
         raise RuntimeError("Pipeline produced no audio.")
     return np.concatenate(chunks)
 
+def _run_onnx(
+    wrapper: _OnnxWrapper,
+    text: str,
+    voice: str,
+    speed: float,
+) -> np.ndarray:
+    """Run the ONNX pipeline and return float32 audio."""
+    return wrapper.generate(text, voice, speed)
 
-# ---------------------------------------------------------------------------
-# Quality metrics
+
+
 # ---------------------------------------------------------------------------
 
 def _snr_db(ref: np.ndarray, deg: np.ndarray) -> float:
@@ -301,17 +367,15 @@ def _benchmark_one(
 
     result: dict[str, Any] = {"Precision": precision}
 
-    if isinstance(pipe_or_err, str):
+    if isinstance(pipe_or_err, str) or pipe_or_err is None:
         # A load error was recorded at cache-build time.
         result["Time (s)"]       = "—"
         result["Speedup"]        = "—"
         result["Peak ΔRAM (MB)"] = "—"
         result["SNR (dB)"]       = "—"
-        result["PESQ"]           = pipe_or_err
+        result["PESQ"]           = pipe_or_err or "Not loaded"
         result["_audio"]         = None
         return result
-
-    pipe: KPipeline = pipe_or_err
 
     # ----- timed inference with tracemalloc -----
     gc.collect()
@@ -319,10 +383,13 @@ def _benchmark_one(
     t0 = time.perf_counter()
 
     try:
-        audio = _run_pipeline(
-            pipe, text, voice, speed,
-            use_bf16_autocast=(precision == "BF16"),
-        )
+        if isinstance(pipe_or_err, _OnnxWrapper):
+            audio = _run_onnx(pipe_or_err, text, voice, speed)
+        else:
+            audio = _run_pipeline(
+                pipe_or_err, text, voice, speed,
+                use_bf16_autocast=(precision == "BF16"),
+            )
         ok = True
     except Exception as exc:
         audio = None
@@ -433,8 +500,11 @@ def profile_ops(
     _ensure_pipelines()
     pipe_or_err = _BENCH_CACHE.get(precision)
 
-    if isinstance(pipe_or_err, str):
+    if isinstance(pipe_or_err, str) or pipe_or_err is None:
         return [], f"Pipeline not available: {pipe_or_err}"
+
+    if isinstance(pipe_or_err, _OnnxWrapper):
+        return [], "⚠️ torch.profiler only captures PyTorch ops. Use the Benchmark tab to measure ONNX timing."
 
     pipe: KPipeline = pipe_or_err
     use_bf16 = (precision == "BF16")
@@ -501,8 +571,33 @@ def profile_chunks(
     _ensure_pipelines()
     pipe_or_err = _BENCH_CACHE.get(precision)
 
-    if isinstance(pipe_or_err, str):
+    if isinstance(pipe_or_err, str) or pipe_or_err is None:
         return [], f"Pipeline not available: {pipe_or_err}"
+
+    # ONNX: single-shot, no generator — synthesise and return one row.
+    if isinstance(pipe_or_err, _OnnxWrapper):
+        t0 = time.perf_counter()
+        try:
+            arr = _run_onnx(pipe_or_err, text, voice, speed)
+        except Exception as exc:
+            return [], f"ONNX RUN ERROR: {exc}"
+        total_ms = (time.perf_counter() - t0) * 1_000
+        samples = arr.size if arr is not None else 0
+        audio_dur_ms = samples / SAMPLE_RATE * 1_000
+        rtf = (audio_dur_ms / 1_000) / (total_ms / 1_000) if total_ms > 0 else float("inf")
+        rows = [{
+            "Chunk": 0,
+            "Stage": "full synthesis (ONNX)",
+            "Δt (ms)": round(total_ms, 1),
+            "Audio dur (ms)": round(audio_dur_ms, 1),
+            "RTF (×RT)": f"{rtf:.2f}×",
+            "Cumulative (ms)": round(total_ms, 1),
+        }]
+        summary = (
+            f"**ONNX** — {total_ms:.0f} ms total.  \n"
+            f"RTF: {rtf:.2f}× (>1 = faster than real-time)."
+        )
+        return rows, summary
 
     pipe: KPipeline = pipe_or_err
     use_bf16 = (precision == "BF16")

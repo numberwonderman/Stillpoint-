@@ -117,6 +117,7 @@ def gradio_benchmark(text, voice, speed):
     fp32_audio = _to_gr_audio(audio_map.get("FP32"))
     bf16_audio = _to_gr_audio(audio_map.get("BF16"))
     int8_audio = _to_gr_audio(audio_map.get("INT8"))
+    onnx_audio = _to_gr_audio(audio_map.get("ONNX"))
 
     # --- markdown summary ---
     lines = ["### Benchmark Summary\n"]
@@ -132,7 +133,12 @@ def gradio_benchmark(text, voice, speed):
         )
     summary_md = "  \n".join(lines)
 
-    return table_rows, fp32_audio, bf16_audio, int8_audio, summary_md
+    for r in results:
+        del r["_audio"]
+
+    table_rows = [list(r.values()) for r in results]
+
+    return table_rows, fp32_audio, bf16_audio, int8_audio, onnx_audio, summary_md
 
 
 # ---------------------------------------------------------
@@ -241,6 +247,7 @@ with gr.Blocks(
             | FP32-CL | Float32 with `channels_last` memory format (NHWC). Greatly speeds up MKL-DNN convolutions on CPU. |
             | BF16 | Weights cast to bfloat16 (AVX-512 BF16 on modern Intel/AMD CPUs) |
             | INT8 | `torch.quantization.quantize_dynamic` on all `nn.Linear` layers |
+            | ONNX | **ONNX Runtime** C++ backend. Fuses convolutions, batch norm and LSTMs. Downloads models on first run. |
 
             > **Note**: First run will take longer while the three pipelines are built and cached.
             """
@@ -311,6 +318,10 @@ with gr.Blocks(
                 label="INT8",
                 type="numpy",
             )
+            bench_onnx_audio = gr.Audio(
+                label="ONNX",
+                type="numpy",
+            )
 
         bench_button.click(
             fn=gradio_benchmark,
@@ -324,6 +335,7 @@ with gr.Blocks(
                 bench_fp32_audio,
                 bench_bf16_audio,
                 bench_int8_audio,
+                bench_onnx_audio,
                 bench_summary,
             ],
             api_name="benchmark",
@@ -341,7 +353,7 @@ with gr.Blocks(
 
         with gr.Row():
             prof_precision = gr.Dropdown(
-                choices=["FP32", "FP32-CL", "BF16", "INT8"],
+                choices=["FP32", "FP32-CL", "BF16", "INT8", "ONNX"],
                 value="FP32",
                 label="Precision Mode",
                 scale=1,

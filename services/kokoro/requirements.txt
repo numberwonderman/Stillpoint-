@@ -10,3 +10,6 @@ soundfile
 torch>=2.8
 pesq
 scipy
+onnxruntime
+kokoro-onnx
+huggingface_hub
