@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -19,12 +20,38 @@ _STREAM_CHUNK = 4096
 # ONNX pipeline (primary CPU engine)
 # ---------------------------------------------------------
 #
-# kokoro-onnx v0.6+ accepts either:
-#   • a combined voices.bin path  (old format)
-#   • a directory of per-voice .bin files  (onnx-community repo format)
-# We use snapshot_download with allow_patterns so we only fetch the ONNX
-# model and the voices directory — all cached after first run.
+# `kokoro_onnx.Kokoro` requires a single combined `voices-v1.0.bin`
+# (a numpy .npz of style vectors), NOT the per-voice `voices/` directory
+# that the `onnx-community` HF repo ships. The combined file lives in
+# the thewh1teagle/kokoro-onnx GitHub release. We download it once into
+# a local cache so repeated cold-starts don't re-fetch.
 #
+import urllib.request
+
+_VOICES_BIN_URL = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
+    "model-files-v1.1/voices-v1.0.bin"
+)
+
+
+def _ensure_voices_bin() -> str:
+    """Download voices-v1.0.bin from the kokoro-onnx release if missing.
+
+    Cached under HF_HUB_CACHE (or ~/.cache/huggingface/hub) so the
+    28 MB file is fetched at most once per machine.
+    """
+    cache_root = Path(
+        os.environ.get("HF_HUB_CACHE")
+        or os.path.expanduser("~/.cache/huggingface/hub")
+    )
+    dest = cache_root / "kokoro-voices-v1.0.bin"
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[tts] Fetching voices-v1.0.bin → {dest}")
+        urllib.request.urlretrieve(_VOICES_BIN_URL, dest)
+    return str(dest)
+
+
 _ONNX_PIPE = None
 
 print("[tts] Trying ONNX pipeline …")
@@ -32,14 +59,17 @@ try:
     from kokoro_onnx import Kokoro as _KokoroOnnx
     from huggingface_hub import snapshot_download as _snap
 
+    # 1) ONNX model from the canonical onnx-community export.
     _repo = _snap(
         repo_id="onnx-community/Kokoro-82M-v1.0-ONNX",
-        allow_patterns=["onnx/model.onnx", "voices/*.bin"],
+        allow_patterns=["onnx/model.onnx"],
     )
-    _model_file  = os.path.join(_repo, "onnx", "model.onnx")
-    _voices_dir  = os.path.join(_repo, "voices")
+    _model_file = os.path.join(_repo, "onnx", "model.onnx")
 
-    _ONNX_PIPE = _KokoroOnnx(_model_file, _voices_dir)
+    # 2) Combined voices .npz, downloaded once and cached locally.
+    _voices_file = _ensure_voices_bin()
+
+    _ONNX_PIPE = _KokoroOnnx(_model_file, _voices_file)
     print("[tts] ONNX pipeline ready ✓")
 
 except Exception as _e:
