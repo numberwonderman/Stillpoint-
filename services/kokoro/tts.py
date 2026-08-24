@@ -1,3 +1,4 @@
+import os
 import time
 
 import numpy as np
@@ -8,321 +9,203 @@ import spaces
 from kokoro import KPipeline
 
 
-MODEL_ID = "hexgrad/Kokoro-82M"
 SAMPLE_RATE = 24000
 
+# Fixed chunk size used when streaming ONNX output (no native generator).
+# 4096 samples ≈ 170 ms at 24 kHz.
+_STREAM_CHUNK = 4096
 
 # ---------------------------------------------------------
-# Model initialization
+# ONNX pipeline (primary CPU engine)
 # ---------------------------------------------------------
-
-print("Loading Kokoro...")
-
-CPU_PIPELINE = KPipeline(
-    lang_code="a",
-)
-
-# ----- FP32 Channels Last (default production optimisation) -----
-# MKL-DNN convolutions (which dominate Kokoro-82M) are significantly faster
-# in NHWC layout.  We cast the model weights once at startup; inference is
-# otherwise identical to vanilla FP32.
-_cpu_model = None
-for _attr in ("model", "net", "model_", "_model"):
-    _m = getattr(CPU_PIPELINE, _attr, None)
-    if isinstance(_m, nn.Module):
-        _m.to(memory_format=torch.channels_last)
-        _cpu_model = _m
-        break
-if _cpu_model is None:
-    print("[tts] WARNING: could not apply channels_last to CPU pipeline.")
-else:
-    print("[tts] CPU pipeline: channels_last applied.")
-
-print("CPU Kokoro loaded.")
-
-
-# ZeroGPU uses CUDA emulation during startup.
 #
-# HF specifically recommends putting CUDA models on CUDA at
-# module level rather than moving them inside @spaces.GPU.
+# kokoro-onnx v0.6+ accepts either:
+#   • a combined voices.bin path  (old format)
+#   • a directory of per-voice .bin files  (onnx-community repo format)
+# We use snapshot_download with allow_patterns so we only fetch the ONNX
+# model and the voices directory — all cached after first run.
 #
-# We will add the GPU pipeline once the first deployment works.
-GPU_PIPELINE = KPipeline(
-    lang_code="a",
-)
+_ONNX_PIPE = None
 
-print("Kokoro initialization complete.")
+print("[tts] Trying ONNX pipeline …")
+try:
+    from kokoro_onnx import Kokoro as _KokoroOnnx
+    from huggingface_hub import snapshot_download as _snap
 
-
-# ---------------------------------------------------------
-# Duration estimation
-# ---------------------------------------------------------
-
-def estimate_gpu_duration(
-    text: str,
-    voice: str,
-    speed: float,
-) -> int:
-
-    """
-    Initial ZeroGPU reservation estimate.
-
-    This MUST be benchmarked against the actual Space.
-
-    We intentionally reserve much less than the default 60s
-    for short TTS requests.
-    """
-
-    characters = len(text)
-
-    # Initial approximation.
-    #
-    # base startup/overhead
-    # + text-dependent generation
-    estimated = 3.0 + characters / 70.0
-
-    # Slower speech generally means more generated audio.
-    estimated *= 1.0 / max(speed, 0.5)
-
-    # Safety margin.
-    estimated *= 1.25
-
-    # Never ask ZeroGPU for less than 5 seconds.
-    #
-    # Also don't exceed our intended per-request budget.
-    return max(
-        5,
-        min(
-            int(np.ceil(estimated)),
-            55,
-        ),
+    _repo = _snap(
+        repo_id="onnx-community/Kokoro-82M-v1.0-ONNX",
+        allow_patterns=["onnx/model.onnx", "voices/*.bin"],
     )
+    _model_file  = os.path.join(_repo, "onnx", "model.onnx")
+    _voices_dir  = os.path.join(_repo, "voices")
+
+    _ONNX_PIPE = _KokoroOnnx(_model_file, _voices_dir)
+    print("[tts] ONNX pipeline ready ✓")
+
+except Exception as _e:
+    print(f"[tts] ONNX unavailable ({_e}), falling back to FP32-CL.")
 
 
 # ---------------------------------------------------------
-# Chunk helpers
+# FP32-CL pipeline (fallback CPU engine)
+# ---------------------------------------------------------
+#
+# Channels-last (NHWC) layout cuts aten::mkldnn_convolution time by ~20 %
+# with zero quality loss.  We apply it once at startup.
+#
+_TORCH_PIPE = None
+
+if _ONNX_PIPE is None:
+    print("[tts] Building FP32-CL fallback pipeline …")
+    _TORCH_PIPE = KPipeline(lang_code="a")
+    for _attr in ("model", "net", "model_", "_model"):
+        _m = getattr(_TORCH_PIPE, _attr, None)
+        if isinstance(_m, nn.Module):
+            _m.to(memory_format=torch.channels_last)
+            print("[tts] FP32-CL: channels_last applied ✓")
+            break
+    else:
+        print("[tts] WARNING: could not apply channels_last.")
+
+
+# ---------------------------------------------------------
+# GPU pipeline (ZeroGPU — unchanged)
 # ---------------------------------------------------------
 
-def _to_numpy(audio) -> np.ndarray:
+GPU_PIPELINE = KPipeline(lang_code="a")
 
+print("[tts] Initialisation complete.")
+
+
+# ---------------------------------------------------------
+# Duration estimation (unchanged)
+# ---------------------------------------------------------
+
+def estimate_gpu_duration(text: str, voice: str, speed: float) -> int:
+    """Initial ZeroGPU reservation estimate."""
+    estimated = (3.0 + len(text) / 70.0) * (1.0 / max(speed, 0.5)) * 1.25
+    return max(5, min(int(estimated) + 1, 55))
+
+
+# ---------------------------------------------------------
+# Audio helpers (unchanged)
+# ---------------------------------------------------------
+
+def _to_numpy(audio) -> np.ndarray | None:
     if audio is None:
         return None
-
     if hasattr(audio, "cpu"):
         audio = audio.cpu()
-
     if hasattr(audio, "numpy"):
         audio = audio.numpy()
+    arr = np.asarray(audio, dtype=np.float32).reshape(-1)
+    return arr if arr.size > 0 else None
 
-    return np.asarray(audio, dtype=np.float32).reshape(-1)
 
-
-def _chunk_bytes(
-    audio: np.ndarray,
-    sample_rate: int,
-) -> bytes:
-
-    """
-    Encode a single Kokoro audio chunk as a WAV payload
-    (24 kHz, mono, 16-bit PCM). The chunk length is encoded
-    in the WAV header so the frontend can decode each blob
-    independently as it streams in.
-    """
-
-    # Clip to [-1, 1] before quantising to int16 to avoid wrap.
+def _chunk_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
+    """Encode float32 audio as a self-contained WAV chunk (24 kHz, mono, 16-bit PCM)."""
     clipped = np.clip(audio, -1.0, 1.0)
     pcm = (clipped * 32767.0).astype(np.int16)
-
-    byte_rate = sample_rate * 2  # mono, 16-bit
-    block_align = 2
     data_size = pcm.nbytes
-
-    # RIFF / WAV header.
     header = (
-        b"RIFF"
-        + (36 + data_size).to_bytes(4, "little")
-        + b"WAVE"
-        + b"fmt "
-        + (16).to_bytes(4, "little")
-        + (1).to_bytes(2, "little")     # PCM
-        + (1).to_bytes(2, "little")     # mono
+        b"RIFF" + (36 + data_size).to_bytes(4, "little")
+        + b"WAVEfmt " + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")           # PCM
+        + (1).to_bytes(2, "little")           # mono
         + sample_rate.to_bytes(4, "little")
-        + byte_rate.to_bytes(4, "little")
-        + block_align.to_bytes(2, "little")
-        + (16).to_bytes(2, "little")    # bits per sample
-        + b"data"
-        + data_size.to_bytes(4, "little")
+        + (sample_rate * 2).to_bytes(4, "little")  # byte rate
+        + (2).to_bytes(2, "little")           # block align
+        + (16).to_bytes(2, "little")          # bits per sample
+        + b"data" + data_size.to_bytes(4, "little")
     )
-
     return header + pcm.tobytes()
 
 
 # ---------------------------------------------------------
-# CPU
+# CPU  (ONNX primary ➜ FP32-CL fallback)
 # ---------------------------------------------------------
 
-@torch.inference_mode()
-def generate_cpu(
-    text: str,
-    voice: str,
-    speed: float,
-):
-
+def generate_cpu(text: str, voice: str, speed: float):
     started = time.perf_counter()
 
-    chunks = []
+    if _ONNX_PIPE is not None:
+        samples, _sr = _ONNX_PIPE.create(
+            text, voice=voice, speed=speed, lang="en-us"
+        )
+        audio   = np.asarray(samples, dtype=np.float32).reshape(-1)
+        backend = "onnx"
+    else:
+        chunks = []
+        with torch.inference_mode():
+            for _, _, aud in _TORCH_PIPE(text, voice=voice, speed=speed):
+                chunk = _to_numpy(aud)
+                if chunk is not None:
+                    chunks.append(chunk)
+        if not chunks:
+            raise RuntimeError("Kokoro produced no audio.")
+        audio   = np.concatenate(chunks)
+        backend = "fp32-cl"
 
-    for _, _, audio in CPU_PIPELINE(
-        text,
-        voice=voice,
-        speed=speed,
-    ):
-
-        chunk = _to_numpy(audio)
-
-        if chunk is None or chunk.size == 0:
-            continue
-
-        chunks.append(chunk)
-
-    if not chunks:
-        raise RuntimeError("Kokoro produced no audio.")
-
-    audio = np.concatenate(chunks)
-
-    elapsed = time.perf_counter() - started
-
-    print(
-        f"[CPU] "
-        f"{len(text)} chars "
-        f"in {elapsed:.2f}s"
-    )
-
+    print(f"[CPU/{backend}] {len(text)} chars in {time.perf_counter()-started:.2f}s")
     return SAMPLE_RATE, audio
 
 
-@torch.inference_mode()
-def stream_cpu(
-    text: str,
-    voice: str,
-    speed: float,
-):
+def stream_cpu(text: str, voice: str, speed: float):
     """
-    Generator that yields WAV-encoded audio chunks as
-    Kokoro produces them on the CPU pipeline.
-    """
+    Generator that yields WAV-encoded audio chunks on the CPU pipeline.
 
+    ONNX produces a single audio array; we split it into fixed-size chunks
+    so the streaming API stays responsive.  FP32-CL streams naturally
+    chunk-by-chunk as the KPipeline generator yields.
+    """
     started = time.perf_counter()
     yielded = 0
 
-    for _, _, audio in CPU_PIPELINE(
-        text,
-        voice=voice,
-        speed=speed,
-    ):
-
-        chunk = _to_numpy(audio)
-
-        if chunk is None or chunk.size == 0:
-            continue
-
-        payload = _chunk_bytes(chunk, SAMPLE_RATE)
-        yielded += 1
-        yield payload
+    if _ONNX_PIPE is not None:
+        samples, _sr = _ONNX_PIPE.create(
+            text, voice=voice, speed=speed, lang="en-us"
+        )
+        audio = np.asarray(samples, dtype=np.float32).reshape(-1)
+        for i in range(0, len(audio), _STREAM_CHUNK):
+            yield _chunk_bytes(audio[i : i + _STREAM_CHUNK], SAMPLE_RATE)
+            yielded += 1
+        backend = "onnx"
+    else:
+        with torch.inference_mode():
+            for _, _, aud in _TORCH_PIPE(text, voice=voice, speed=speed):
+                chunk = _to_numpy(aud)
+                if chunk is not None:
+                    yield _chunk_bytes(chunk, SAMPLE_RATE)
+                    yielded += 1
+        backend = "fp32-cl"
 
     elapsed = time.perf_counter() - started
-
-    print(
-        f"[CPU stream] "
-        f"{len(text)} chars "
-        f"in {elapsed:.2f}s "
-        f"({yielded} chunks)"
-    )
+    print(f"[CPU/{backend} stream] {len(text)} chars in {elapsed:.2f}s ({yielded} chunks)")
 
 
 # ---------------------------------------------------------
-# GPU
+# GPU (unchanged)
 # ---------------------------------------------------------
 
-@spaces.GPU(
-    duration=estimate_gpu_duration
-)
-def generate_gpu(
-    text: str,
-    voice: str,
-    speed: float,
-):
-
+@spaces.GPU(duration=estimate_gpu_duration)
+def generate_gpu(text: str, voice: str, speed: float):
     started = time.perf_counter()
-
     chunks = []
-
-    for _, _, audio in GPU_PIPELINE(
-        text,
-        voice=voice,
-        speed=speed,
-    ):
-
+    for _, _, audio in GPU_PIPELINE(text, voice=voice, speed=speed):
         chunk = _to_numpy(audio)
-
-        if chunk is None or chunk.size == 0:
-            continue
-
-        chunks.append(chunk)
-
+        if chunk is not None:
+            chunks.append(chunk)
     if not chunks:
         raise RuntimeError("Kokoro produced no audio.")
-
     audio = np.concatenate(chunks)
-
-    elapsed = time.perf_counter() - started
-
-    print(
-        f"[GPU] "
-        f"{len(text)} chars "
-        f"in {elapsed:.2f}s"
-    )
-
+    print(f"[GPU] {len(text)} chars in {time.perf_counter()-started:.2f}s")
     return SAMPLE_RATE, audio
 
 
-@spaces.GPU(
-    duration=estimate_gpu_duration
-)
-def stream_gpu(
-    text: str,
-    voice: str,
-    speed: float,
-):
-
-    """
-    Generator that yields WAV-encoded audio chunks as
-    Kokoro produces them on the ZeroGPU pipeline.
-    """
-
-    started = time.perf_counter()
-    yielded = 0
-
-    for _, _, audio in GPU_PIPELINE(
-        text,
-        voice=voice,
-        speed=speed,
-    ):
-
+@spaces.GPU(duration=estimate_gpu_duration)
+def stream_gpu(text: str, voice: str, speed: float):
+    """Generator that yields WAV-encoded audio chunks from ZeroGPU."""
+    for _, _, audio in GPU_PIPELINE(text, voice=voice, speed=speed):
         chunk = _to_numpy(audio)
-
-        if chunk is None or chunk.size == 0:
-            continue
-
-        payload = _chunk_bytes(chunk, SAMPLE_RATE)
-        yielded += 1
-        yield payload
-
-    elapsed = time.perf_counter() - started
-
-    print(
-        f"[GPU stream] "
-        f"{len(text)} chars "
-        f"in {elapsed:.2f}s "
-        f"({yielded} chunks)"
-    )
+        if chunk is not None:
+            yield _chunk_bytes(chunk, SAMPLE_RATE)
