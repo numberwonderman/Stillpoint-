@@ -113,6 +113,11 @@ export function useStillpoint() {
         ];
         targetStorage.setItem("stillpoint:threads", JSON.stringify(merged));
         targetStorage.setItem("stillpoint:activeThreadId", activeThreadId);
+        // Keep in-memory state in sync with what's now in the target
+        // storage engine — every later thread-mutating action persists
+        // via `threads` state, so leaving it stale here would clobber
+        // `existingTarget` the next time anything writes through.
+        setThreads(merged);
         setStorageMigrationToast(
           newMode === "local"
             ? `"${activeTitle}" moved to Local Storage — survives restarts.`
@@ -120,6 +125,12 @@ export function useStillpoint() {
         );
       } else {
         targetStorage.removeItem("stillpoint:activeThreadId");
+        let existingTarget = [];
+        try {
+          const raw = targetStorage.getItem("stillpoint:threads");
+          if (raw) existingTarget = JSON.parse(raw) || [];
+        } catch {}
+        setThreads(existingTarget);
       }
     } catch {
       /* storage error */
@@ -285,26 +296,31 @@ export function useStillpoint() {
     setThreads((prev) => {
       const updated = prev.map((t) => {
         if (t.id !== activeThreadId) return t;
-        const updatedMessages = t.messages.map((m, i, arr) => {
-          // Only the LAST assistant message can be the active crisis panel.
-          if (i !== arr.length - 1) return m;
-          if (m.role !== "assistant" || !m.crisis) return m;
-          // The user message that triggered the gate is the one
-          // immediately before this assistant message.
-          const triggerUserMsg = i > 0 ? arr[i - 1] : null;
-          if (
-            triggerUserMsg &&
-            triggerUserMsg.role === "user" &&
-            !triggerUserMsg.crisisAcknowledged
-          ) {
-            resubmitText = triggerUserMsg.text;
-            return [
-              { ...triggerUserMsg, crisisAcknowledged: true },
-              { ...m, crisis: false, crisisSeverity: undefined, acknowledgedAt: new Date().toISOString() },
-            ];
+
+        const msgs = t.messages;
+        const lastIdx = msgs.length - 1;
+        const lastMsg = msgs[lastIdx];
+        const isCrisisPanel = lastIdx >= 0 && lastMsg.role === "assistant" && lastMsg.crisis;
+        if (!isCrisisPanel) return t;
+
+        // The user message that triggered the gate is the one
+        // immediately before this assistant message.
+        const triggerIdx = lastIdx > 0 ? lastIdx - 1 : -1;
+        const triggerMsg = triggerIdx >= 0 ? msgs[triggerIdx] : null;
+        const canAcknowledge =
+          triggerMsg && triggerMsg.role === "user" && !triggerMsg.crisisAcknowledged;
+
+        if (canAcknowledge) resubmitText = triggerMsg.text;
+
+        const updatedMessages = msgs.map((m, i) => {
+          if (i === lastIdx) {
+            return { ...m, crisis: false, crisisSeverity: undefined, acknowledgedAt: new Date().toISOString() };
           }
-          return { ...m, crisis: false, crisisSeverity: undefined, acknowledgedAt: new Date().toISOString() };
-        }).flat();
+          if (canAcknowledge && i === triggerIdx) {
+            return { ...m, crisisAcknowledged: true };
+          }
+          return m;
+        });
         return { ...t, messages: updatedMessages };
       });
       try {

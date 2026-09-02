@@ -20,6 +20,22 @@ import { parseInput } from "@/lib/parser";
 import { hasResources, toNopeMessages } from "./history";
 
 /**
+ * NOPE's severity vocabulary (none/mild/moderate/high/critical) is not
+ * the same set of strings the crisis panel's copy is keyed on
+ * (elevated/high/imminent — see `SEVERITY_COPY` in ResponseSection.jsx,
+ * which comes from the local parser's tiers). Without this mapping a
+ * NOPE "critical" verdict falls through the panel's `SEVERITY_COPY[severity]`
+ * lookup and silently renders with the gentlest "elevated" framing —
+ * skipping the imminent-tier 911 callout precisely when it matters most.
+ */
+const NOPE_SEVERITY_TO_TIER = {
+  mild: "elevated",
+  moderate: "elevated",
+  high: "high",
+  critical: "imminent",
+};
+
+/**
  * @param {Array<{role: string, text: string}>} conversation
  * @param {string} country  ISO-3166 alpha-2 country code
  * @param {string} trimmed  the user's current message
@@ -53,7 +69,7 @@ export async function runSafetyGate(conversation, country, trimmed) {
 
   if (safetyEval && safetyEval.evaluationAvailable === true) {
     isCrisis = safetyEval.isCrisis === true;
-    severity = safetyEval.severity || "none";
+    severity = NOPE_SEVERITY_TO_TIER[safetyEval.severity] || "elevated";
     imminence = safetyEval.imminence || "not_applicable";
     crisisResources = Array.isArray(safetyEval.matchedResources)
       ? safetyEval.matchedResources

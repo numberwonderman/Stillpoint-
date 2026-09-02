@@ -141,6 +141,20 @@ export class WasmEngine {
       ...options,
       streamer,
     });
+
+    // A cancel can arrive while the pipeline call above is in flight —
+    // it isn't natively interruptible, so we can only check afterward.
+    // Without this, a cancelled generation still resolves with the full
+    // text and the caller (runLocalAIPipeline) posts it to the same
+    // message id as a normal reply, which is exactly what abortLocalAIInfight()
+    // is supposed to prevent on the crisis-gate path (see cancelLocalAIDownload's
+    // doc comment in localai.js).
+    if (this.cancelled) {
+      const err = new Error("cancelled");
+      err.code = "cancelled";
+      throw err;
+    }
+
     return response;
   }
 
