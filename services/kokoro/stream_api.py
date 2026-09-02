@@ -12,6 +12,7 @@ chunk is available.
 
 from __future__ import annotations
 
+import json
 import os
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -154,15 +155,13 @@ def stream_tts(
             # Surface the error as the final event so the
             # browser can fall back gracefully instead of
             # hanging on an incomplete stream.
+            error_payload = json.dumps({"error": str(exc)}).encode("utf-8")
             yield (
                 boundary
                 + b"\r\nContent-Type: application/json\r\n"
+                + f"Content-Length: {len(error_payload)}\r\n".encode("ascii")
                 + b"\r\n"
-                + (
-                    '{"error": "'
-                    + str(exc).replace('"', "'").encode("utf-8")
-                    + b'"}'
-                )
+                + error_payload
                 + b"\r\n"
             )
             yield boundary + b"--\r\n"
