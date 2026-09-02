@@ -258,6 +258,7 @@ export default function Composer({
                         type="button"
                         role="option"
                         aria-selected={isActive}
+                        disabled={isDownloading}
                         onClick={() => {
                           onEnableLocalAI?.();
                           onSelectTier?.(key);
@@ -266,7 +267,7 @@ export default function Composer({
                           }
                           setShowModelPicker(false);
                         }}
-                        className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors ${
+                        className={`flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                           isActive
                             ? "bg-accent/10 text-accent"
                             : "text-text-muted hover:bg-surface-raised hover:text-text"
