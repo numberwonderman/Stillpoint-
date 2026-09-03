@@ -9,6 +9,8 @@ supportive response?**
 
 Built for [Hack for Humanity | Summer 2026](https://hack-for-humanity-summer-26.devpost.com/).
 
+**Live app:** [stillpoint-bice.vercel.app](https://stillpoint-bice.vercel.app/)
+
 ---
 
 ## How it works
